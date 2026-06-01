@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Environment variables — use .env.example as reference
+.env
+.env.*
+!.env.example
+
 # Financial data — never commit real data
 data/*.db
 data/*.pdf
