@@ -45,8 +45,21 @@ warn_unused_ignores = true
 testpaths = ["tests"]
 addopts = "--cov=src/finances --cov-report=term-missing"
 
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "pep621"
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+changelog_incremental = true
+version_files = [
+    "src/finances/core/config.py:__version__",
+]
+
 [dependency-groups]
 dev = [
+    "commitizen>=4.16.3",
     "mypy>=2.1.0",
     "pre-commit>=4.6.0",
     "pytest>=9.0.3",

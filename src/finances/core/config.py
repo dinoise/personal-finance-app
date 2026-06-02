@@ -1,5 +1,7 @@
 from pathlib import Path
 
+__version__ = "0.1.0"
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ROOT = Path(__file__).resolve().parents[3]
