@@ -54,7 +54,7 @@ update_changelog_on_bump = true
 changelog_file = "CHANGELOG.md"
 changelog_incremental = true
 version_files = [
-    "src/finances/core/config.py:__version__",
+    "src/finances/__init__.py:__version__",
 ]
 
 [dependency-groups]
