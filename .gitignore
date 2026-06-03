@@ -16,6 +16,8 @@ wheels/
 
 # Financial data — never commit real data
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/*.pdf
 data/*.csv
 data/*.xlsx
