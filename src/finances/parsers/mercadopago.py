@@ -10,8 +10,10 @@ from finances.parsers.base import (
     BankName,
     BankParser,
     ParsedAccount,
+    ParsedPocketMovement,
     ParsedStatement,
     ParsedTransaction,
+    StatementData,
 )
 
 _PERIOD_RE = re.compile(r"Periodo:\s+Del\s+(\d{1,2})\s+al\s+(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})")
@@ -31,6 +33,11 @@ _COL_VALUE_MAX: float = 365.0  # Valor  (beyond this → Saldo, ignored)
 # Within a single row, wrapped description lines are at most ~12pt from the anchor.
 # Row pitch is ~35pt, so 15pt safely excludes the next row's text.
 _ROW_HEIGHT: float = 15.0
+
+# Savings pocket movement patterns
+_POCKET_DEPOSIT_RE = re.compile(r"^Monto apartado (.+)$", re.IGNORECASE)
+_POCKET_WITHDRAWAL_RE = re.compile(r"^Monto retirado (.+)$", re.IGNORECASE)
+_POCKET_INTEREST_RE = re.compile(r"^Ganancia", re.IGNORECASE)
 
 _MONTHS: dict[str, int] = {
     "enero": 1,
@@ -128,6 +135,58 @@ class MercadoPagoParser(BankParser):
             for page in pdf.pages:
                 transactions.extend(self._parse_page(page))
         return transactions
+
+    def parse_pocket_movements(
+        self, transactions: list[ParsedTransaction]
+    ) -> list[ParsedPocketMovement]:
+        movements: list[ParsedPocketMovement] = []
+        for i, txn in enumerate(transactions):
+            desc = txn.description
+
+            m = _POCKET_DEPOSIT_RE.match(desc)
+            if m:
+                movements.append(
+                    ParsedPocketMovement(
+                        pocket_name=m.group(1).strip(),
+                        movement_type="deposit",
+                        amount=abs(txn.amount),
+                        transaction_index=i,
+                    )
+                )
+                continue
+
+            m = _POCKET_WITHDRAWAL_RE.match(desc)
+            if m:
+                movements.append(
+                    ParsedPocketMovement(
+                        pocket_name=m.group(1).strip(),
+                        movement_type="withdrawal",
+                        amount=abs(txn.amount),
+                        transaction_index=i,
+                    )
+                )
+                continue
+
+            if _POCKET_INTEREST_RE.match(desc):
+                movements.append(
+                    ParsedPocketMovement(
+                        pocket_name="general",
+                        movement_type="interest",
+                        amount=abs(txn.amount),
+                        transaction_index=i,
+                    )
+                )
+
+        return movements
+
+    def parse(self, path: Path) -> StatementData:
+        transactions = self.parse_transactions(path)
+        return StatementData(
+            account=self.parse_account(path),
+            statement=self.parse_statement(path),
+            transactions=transactions,
+            pocket_movements=self.parse_pocket_movements(transactions),
+        )
 
     def _parse_page(self, page: object) -> list[ParsedTransaction]:  # type: ignore[override]
         """

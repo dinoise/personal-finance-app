@@ -8,6 +8,7 @@ from typing import Literal
 BankName = Literal["nu", "bbva", "banamex", "mercadopago"]
 AccountType = Literal["credit", "debit"]
 TransactionType = Literal["charge", "payment", "refund", "interest"]
+PocketMovementType = Literal["deposit", "withdrawal", "interest"]
 
 
 @dataclass
@@ -46,10 +47,20 @@ class ParsedTransaction:
 
 
 @dataclass
+class ParsedPocketMovement:
+    pocket_name: str
+    movement_type: PocketMovementType
+    amount: Decimal
+    # Index into the transactions list of the originating transaction
+    transaction_index: int
+
+
+@dataclass
 class StatementData:
     account: ParsedAccount
     statement: ParsedStatement
     transactions: list[ParsedTransaction] = field(default_factory=list)
+    pocket_movements: list[ParsedPocketMovement] = field(default_factory=list)
 
 
 class BankParser(ABC):
