@@ -1,3 +1,10 @@
+## v0.3.0 (2026-06-03)
+
+### Feat
+
+- **parsers**: extract savings pocket movements from MercadoPago statements
+- **models**: add savings_pockets and savings_pocket_movements tables
+
 ## v0.2.0 (2026-06-03)
 
 ### Feat
