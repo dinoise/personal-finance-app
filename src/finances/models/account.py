@@ -61,6 +61,7 @@ class Account(Base):
 
     statements: Mapped[list["Statement"]] = relationship(back_populates="account")
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")  # type: ignore[name-defined]  # noqa: F821
+    savings_pockets: Mapped[list["SavingsPocket"]] = relationship(back_populates="account")  # type: ignore[name-defined]  # noqa: F821
 
 
 class Statement(Base):

@@ -1,5 +1,6 @@
 from finances.models.account import Account, Statement
 from finances.models.installment import Installment, InstallmentPlan
+from finances.models.savings_pocket import SavingsPocket, SavingsPocketMovement
 from finances.models.transaction import Category, Label, Transaction
 from finances.models.transfer import Transfer
 from finances.models.withdrawal import CashWithdrawal
@@ -14,4 +15,6 @@ __all__ = [
     "Installment",
     "Transfer",
     "CashWithdrawal",
+    "SavingsPocket",
+    "SavingsPocketMovement",
 ]
