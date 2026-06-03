@@ -40,10 +40,6 @@ class CashWithdrawal(Base):
         ForeignKey("categories.id"),
         comment="Category assigned to this withdrawal, e.g. 'Cash expenses'.",
     )
-    fee_transaction_id: Mapped[int | None] = mapped_column(
-        ForeignKey("transactions.id"),
-        comment="Separate transaction for the withdrawal fee. NULL if no fee was applied.",
-    )
     withdrawal_type: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
