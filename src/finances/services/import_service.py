@@ -9,6 +9,7 @@ Flow:
     5. Persist Statement, Transactions, SavingsPocketMovements atomically.
 """
 
+import hashlib
 import shutil
 from dataclasses import dataclass
 from datetime import date
@@ -40,6 +41,28 @@ _BANK_LABELS: dict[str, str] = {
 
 
 @dataclass
+class ParsedPdfData:
+    """Intermediate object holding the full parse result for a single PDF.
+
+    Stored in st.session_state so the PDF is opened and parsed only once.
+    file_hash is used to detect if the user swapped the uploaded file.
+    """
+
+    bank: str
+    account_type: str
+    file_hash: str
+    data: StatementData
+
+    @property
+    def bank_label(self) -> str:
+        return _BANK_LABELS.get(self.bank, self.bank)
+
+    @property
+    def needs_clabe(self) -> bool:
+        return self.bank == "mercadopago"
+
+
+@dataclass
 class ImportResult:
     statement_id: int
     account_alias: str
@@ -64,37 +87,37 @@ class TransactionRow:
 
 
 # ---------------------------------------------------------------------------
-# Public query helpers (called by views before/after import)
+# Public helpers
 # ---------------------------------------------------------------------------
 
 
-def detect_bank_label(path: Path) -> str | None:
-    """Return the human-readable bank label detected from the PDF, or None."""
+def parse_pdf(path: Path) -> ParsedPdfData | ImportError:
+    """Open and fully parse a PDF. Returns a ParsedPdfData to cache in session state."""
     try:
-        bank, _ = detect_bank_and_type(path)
-        return _BANK_LABELS.get(bank, bank)
-    except ValueError:
-        return None
+        bank, account_type = detect_bank_and_type(path)
+    except ValueError as e:
+        return ImportError(reason=str(e))
 
+    parser = get_parser(bank, account_type)
+    if not parser.validate(path):
+        return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
 
-def needs_clabe(path: Path) -> bool:
-    """Return True if the detected bank requires the user to supply a CLABE."""
-    try:
-        bank, _ = detect_bank_and_type(path)
-        return bank == "mercadopago"
-    except ValueError:
-        return False
+    file_hash = hashlib.md5(path.read_bytes()).hexdigest()
+    data = parser.parse(path)
+
+    return ParsedPdfData(
+        bank=bank,
+        account_type=account_type,
+        file_hash=file_hash,
+        data=data,
+    )
 
 
 def get_existing_account(bank: str, account_type: str) -> tuple[str, str] | None:
-    """
-    Return (clabe, alias) for an existing account of the given bank/type, or None.
-    Used by the view to offer re-use of a known CLABE.
-    """
+    """Return (clabe, alias) for an existing account of the given bank/type, or None."""
     db = SessionLocal()
     try:
-        repo = AccountRepository(db)
-        account = repo.get_by_bank(bank, account_type)
+        account = AccountRepository(db).get_by_bank(bank, account_type)
         if account and account.clabe:
             return account.clabe, account.alias
         return None
@@ -215,32 +238,25 @@ def _insert_pocket_movements(
 # ---------------------------------------------------------------------------
 
 
-def import_pdf(
-    path: Path,
+def import_parsed(
+    parsed: ParsedPdfData,
+    source_path: Path,
     clabe_override: str | None = None,
 ) -> ImportResult | ImportError:
     """
-    Import a bank statement PDF into the database.
+    Persist an already-parsed PDF into the database.
 
     Args:
-        path: Path to the PDF file to import.
-        clabe_override: CLABE provided by the user when the parser cannot extract it
-                        (e.g. MercadoPago statements do not print the CLABE).
+        parsed: Result of a previous parse_pdf() call (held in session state).
+        source_path: Original PDF path, used to archive the file.
+        clabe_override: CLABE provided by the user when the bank doesn't print it.
 
     Returns:
         ImportResult on success, ImportError on failure.
     """
-    try:
-        bank, account_type = detect_bank_and_type(path)
-    except ValueError as e:
-        return ImportError(reason=str(e))
-
-    parser = get_parser(bank, account_type)
-
-    if not parser.validate(path):
-        return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
-
-    data: StatementData = parser.parse(path)
+    bank = parsed.bank
+    account_type = parsed.account_type
+    data: StatementData = parsed.data
     effective_clabe = clabe_override or data.account.clabe
 
     db = SessionLocal()
@@ -270,7 +286,7 @@ def import_pdf(
                 )
             )
 
-        pdf_path = _store_pdf(path, bank, account_type, data.statement.period_start)
+        pdf_path = _store_pdf(source_path, bank, account_type, data.statement.period_start)
 
         statement = account_repo.create_statement(
             account_id=account.id,

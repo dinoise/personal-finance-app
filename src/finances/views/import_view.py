@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -7,20 +8,27 @@ import streamlit as st
 from finances.services.import_service import (
     ImportError,
     ImportResult,
-    detect_bank_label,
+    ParsedPdfData,
     get_existing_account,
     get_statement_transactions,
-    import_pdf,
-    needs_clabe,
+    import_parsed,
+    parse_pdf,
 )
 
+_SESSION_KEY = "parsed_pdf"
 
-def _clabe_input(path: Path, bank_raw: str) -> str | None:
+
+def _get_cached(file_hash: str) -> ParsedPdfData | None:
+    """Return the cached ParsedPdfData if it matches the current file hash."""
+    cached: ParsedPdfData | None = st.session_state.get(_SESSION_KEY)
+    if cached and cached.file_hash == file_hash:
+        return cached
+    return None
+
+
+def _clabe_input(parsed: ParsedPdfData) -> str | None:
     """Render CLABE input for banks that don't print it in their statements."""
-    if not needs_clabe(path):
-        return None
-
-    existing = get_existing_account(bank_raw, "debit")
+    existing = get_existing_account(parsed.bank, parsed.account_type)
     if existing:
         clabe_str, alias = existing
         st.success(f"Existing account found — **{alias}** · CLABE: `{clabe_str}`")
@@ -41,38 +49,47 @@ def render() -> None:
 
     uploaded = st.file_uploader("Select PDF", type=["pdf"])
     if not uploaded:
+        st.session_state.pop(_SESSION_KEY, None)
         return
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(uploaded.read())
-        tmp_path = Path(tmp.name)
+    # Compute hash from the uploaded bytes to detect file changes without re-parsing
+    raw_bytes = uploaded.read()
+    file_hash = hashlib.md5(raw_bytes).hexdigest()
 
-    bank_label = detect_bank_label(tmp_path)
-    if bank_label is None:
-        st.error("Unrecognized PDF. Only Nu, BBVA, Banamex and MercadoPago are supported.")
-        tmp_path.unlink(missing_ok=True)
-        return
+    parsed = _get_cached(file_hash)
+    if parsed is None:
+        # First time seeing this file — write to temp and parse once
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = Path(tmp.name)
 
-    st.info(f"Detected bank: **{bank_label}**")
+        with st.spinner("Reading PDF…"):
+            result = parse_pdf(tmp_path)
+            tmp_path.unlink(missing_ok=True)
 
-    _label_to_key = {
-        "Nu": "nu",
-        "BBVA": "bbva",
-        "Banamex": "banamex",
-        "Mercado Pago": "mercadopago",
-    }
-    bank_raw = _label_to_key.get(bank_label, bank_label.lower())
+        if isinstance(result, ImportError):
+            st.error(f"Could not read PDF: {result.reason}")
+            return
 
-    clabe = _clabe_input(tmp_path, bank_raw)
-    if needs_clabe(tmp_path) and not clabe:
+        parsed = result
+        st.session_state[_SESSION_KEY] = parsed
+
+    st.info(f"Detected bank: **{parsed.bank_label}**")
+
+    clabe = _clabe_input(parsed) if parsed.needs_clabe else None
+    if parsed.needs_clabe and not clabe:
         st.warning("Provide the CLABE to continue.")
-        tmp_path.unlink(missing_ok=True)
         return
 
     if st.button("Import", type="primary"):
+        # Write to temp again only for archiving — no re-parse
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            source_path = Path(tmp.name)
+
         with st.spinner("Importing…"):
-            result = import_pdf(tmp_path, clabe_override=clabe)
-        tmp_path.unlink(missing_ok=True)
+            result = import_parsed(parsed, source_path, clabe_override=clabe)
+        source_path.unlink(missing_ok=True)
 
         if isinstance(result, ImportError):
             st.error(f"Import failed: {result.reason}")
@@ -80,6 +97,7 @@ def render() -> None:
 
         assert isinstance(result, ImportResult)
         st.success("Import complete!")
+        st.session_state.pop(_SESSION_KEY, None)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Transactions", result.transactions_inserted)
