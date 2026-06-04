@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.transaction import Transaction
 
 _PLAN_STATUSES = "active, completed, cancelled"
 
@@ -54,8 +60,8 @@ class InstallmentPlan(Base):
         String(20), default="active", comment=f"Plan status. Valid values: {_PLAN_STATUSES}."
     )
 
-    installments: Mapped[list["Installment"]] = relationship(back_populates="plan")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="installment_plan")
+    installments: Mapped[list[Installment]] = relationship(back_populates="plan")
+    transactions: Mapped[list[Transaction]] = relationship(back_populates="installment_plan")
 
 
 class Installment(Base):
@@ -88,8 +94,5 @@ class Installment(Base):
         default=False, comment="True when the installment has appeared in a statement."
     )
 
-    plan: Mapped["InstallmentPlan"] = relationship(back_populates="installments")
-    transaction: Mapped["Transaction | None"] = relationship()
-
-
-from finances.models.transaction import Transaction  # noqa: E402
+    plan: Mapped[InstallmentPlan] = relationship(back_populates="installments")
+    transaction: Mapped[Transaction | None] = relationship()

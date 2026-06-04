@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.account import Account
+    from finances.models.transaction import Transaction
 
 POCKET_MOVEMENT_TYPES = ("deposit", "withdrawal", "interest")
 
@@ -37,8 +44,8 @@ class SavingsPocket(Base):
         comment="False when the pocket has been closed by the user.",
     )
 
-    account: Mapped["Account"] = relationship(back_populates="savings_pockets")
-    movements: Mapped[list["SavingsPocketMovement"]] = relationship(back_populates="pocket")
+    account: Mapped[Account] = relationship(back_populates="savings_pockets")
+    movements: Mapped[list[SavingsPocketMovement]] = relationship(back_populates="pocket")
 
 
 class SavingsPocketMovement(Base):
@@ -84,9 +91,5 @@ class SavingsPocketMovement(Base):
         comment="Pocket balance after this movement. NULL if not reported by the bank.",
     )
 
-    pocket: Mapped["SavingsPocket"] = relationship(back_populates="movements")
-    transaction: Mapped["Transaction"] = relationship()
-
-
-from finances.models.account import Account  # noqa: E402
-from finances.models.transaction import Transaction  # noqa: E402
+    pocket: Mapped[SavingsPocket] = relationship(back_populates="movements")
+    transaction: Mapped[Transaction] = relationship()

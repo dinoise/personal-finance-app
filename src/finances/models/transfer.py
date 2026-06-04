@@ -1,10 +1,16 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, Date, ForeignKey, Index, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.account import Account
 
 _TRANSFER_TYPES = "internal, outgoing, incoming"
 
@@ -86,8 +92,5 @@ class Transfer(Base):
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, comment="Transfer date.")
 
-    from_account: Mapped["Account | None"] = relationship(foreign_keys=[from_account_id])
-    to_account: Mapped["Account | None"] = relationship(foreign_keys=[to_account_id])
-
-
-from finances.models.account import Account  # noqa: E402
+    from_account: Mapped[Account | None] = relationship(foreign_keys=[from_account_id])
+    to_account: Mapped[Account | None] = relationship(foreign_keys=[to_account_id])

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -12,6 +15,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.account import Account, Statement
+    from finances.models.installment import InstallmentPlan
 
 _TRANSACTION_TYPES = "charge, payment, refund, interest"
 
@@ -38,12 +45,12 @@ class Category(Base):
         Numeric(12, 2), comment="Monthly budget in MXN. Used for alerts in the dashboard."
     )
 
-    parent: Mapped["Category | None"] = relationship(
+    parent: Mapped[Category | None] = relationship(
         back_populates="children", remote_side="Category.id"
     )
-    children: Mapped[list["Category"]] = relationship(back_populates="parent")
-    labels: Mapped[list["Label"]] = relationship(back_populates="category")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="category")
+    children: Mapped[list[Category]] = relationship(back_populates="parent")
+    labels: Mapped[list[Label]] = relationship(back_populates="category")
+    transactions: Mapped[list[Transaction]] = relationship(back_populates="category")
 
 
 class Label(Base):
@@ -70,7 +77,7 @@ class Label(Base):
         default=100, comment="Evaluation order. Lower number = higher priority."
     )
 
-    category: Mapped["Category"] = relationship(back_populates="labels")
+    category: Mapped[Category] = relationship(back_populates="labels")
 
 
 class Transaction(Base):
@@ -143,13 +150,7 @@ class Transaction(Base):
         ),
     )
 
-    account: Mapped["Account"] = relationship(back_populates="transactions")
-    statement: Mapped["Statement"] = relationship(back_populates="transactions")
-    category: Mapped["Category | None"] = relationship(back_populates="transactions")
-    installment_plan: Mapped["InstallmentPlan | None"] = relationship(back_populates="transactions")
-
-
-from finances.models.account import Account, Statement  # noqa: E402
-from finances.models.installment import InstallmentPlan  # noqa: E402
-
-Transaction.account  # noqa: B018
+    account: Mapped[Account] = relationship(back_populates="transactions")
+    statement: Mapped[Statement] = relationship(back_populates="transactions")
+    category: Mapped[Category | None] = relationship(back_populates="transactions")
+    installment_plan: Mapped[InstallmentPlan | None] = relationship(back_populates="transactions")

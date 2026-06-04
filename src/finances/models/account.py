@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     CheckConstraint,
@@ -15,6 +18,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.savings_pocket import SavingsPocket
+    from finances.models.transaction import Transaction
 
 _ACCOUNT_TYPES = "credit, debit"
 
@@ -59,9 +66,9 @@ class Account(Base):
         default=True, comment="Set to False to archive the account without deleting its data."
     )
 
-    statements: Mapped[list["Statement"]] = relationship(back_populates="account")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="account")  # type: ignore[name-defined]  # noqa: F821
-    savings_pockets: Mapped[list["SavingsPocket"]] = relationship(back_populates="account")  # type: ignore[name-defined]  # noqa: F821
+    statements: Mapped[list[Statement]] = relationship(back_populates="account")
+    transactions: Mapped[list[Transaction]] = relationship(back_populates="account")
+    savings_pockets: Mapped[list[SavingsPocket]] = relationship(back_populates="account")
 
 
 class Statement(Base):
@@ -102,5 +109,5 @@ class Statement(Base):
         DateTime, default=func.now(), comment="Timestamp when this statement was imported."
     )
 
-    account: Mapped["Account"] = relationship(back_populates="statements")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="statement")  # type: ignore[name-defined]  # noqa: F821
+    account: Mapped[Account] = relationship(back_populates="statements")
+    transactions: Mapped[list[Transaction]] = relationship(back_populates="statement")
