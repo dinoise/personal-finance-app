@@ -1,6 +1,6 @@
 [project]
 name = "personal-finance-app"
-version = "0.3.0"
+version = "0.5.0"
 description = "Local analysis application for Mexican bank statements"
 readme = "README.md"
 requires-python = ">=3.14"

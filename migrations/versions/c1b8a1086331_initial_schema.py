@@ -79,9 +79,6 @@ def upgrade() -> None:
             comment="Set to False to archive the account without deleting its data.",
         ),
         sa.CheckConstraint("account_type IN ('credit', 'debit')", name="ck_account_type"),
-        sa.CheckConstraint(
-            "bank IN ('nu', 'bbva', 'banamex', 'mercadopago')", name="ck_account_bank"
-        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("clabe"),
         comment="Catalog of all bank accounts. CLABE is the natural unique identifier.",

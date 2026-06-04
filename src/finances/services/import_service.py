@@ -9,35 +9,84 @@ Flow:
     5. Persist Statement, Transactions, SavingsPocketMovements atomically.
 """
 
+import hashlib
 import shutil
-from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from finances.core.config import settings
-from finances.models.account import Account, Statement
-from finances.parsers.base import ParsedPocketMovement, ParsedTransaction, StatementData
+from finances.core.database import SessionLocal
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
+from finances.parsers.registry import get_config
 from finances.repositories.account_repository import AccountRepository
 from finances.repositories.savings_pocket_repository import SavingsPocketRepository
 from finances.repositories.transaction_repository import TransactionRepository
+from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData, TransactionRow
+from finances.schemas.parser_schemas import ParsedPocketMovement, ParsedTransaction, StatementData
+
+# ---------------------------------------------------------------------------
+# Public helpers
+# ---------------------------------------------------------------------------
 
 
-@dataclass
-class ImportResult:
-    account: Account
-    statement: Statement
-    transactions_inserted: int
-    pocket_movements_inserted: int
-    pdf_stored_path: Path
+def parse_pdf(path: Path) -> ParsedPdfData | ImportError:
+    """Open and fully parse a PDF. Returns a ParsedPdfData to cache in session state."""
+    try:
+        bank, account_type = detect_bank_and_type(path)
+    except ValueError as e:
+        return ImportError(reason=str(e))
+
+    parser = get_parser(bank, account_type)
+    if not parser.validate(path):
+        return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
+
+    file_hash = hashlib.md5(path.read_bytes()).hexdigest()
+    data = parser.parse(path)
+
+    return ParsedPdfData(
+        bank=bank,
+        account_type=account_type,
+        file_hash=file_hash,
+        data=data,
+    )
 
 
-@dataclass
-class ImportError:
-    reason: str
+def get_existing_account(bank: str, account_type: str) -> tuple[str, str] | None:
+    """Return (clabe, alias) for an existing account of the given bank/type, or None."""
+    db = SessionLocal()
+    try:
+        account = AccountRepository(db).get_by_bank(bank, account_type)
+        if account and account.clabe:
+            return account.clabe, account.alias
+        return None
+    finally:
+        db.close()
+
+
+def get_statement_transactions(statement_id: int) -> list[TransactionRow]:
+    """Return all transactions for a statement as plain dataclass rows."""
+    db = SessionLocal()
+    try:
+        txns = TransactionRepository(db).get_by_statement(statement_id)
+        return [
+            TransactionRow(
+                date=t.date,
+                description=t.description,
+                amount=t.amount,
+                transaction_type=t.transaction_type,
+                bank_reference=t.bank_reference,
+            )
+            for t in txns
+        ]
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _store_pdf(src: Path, bank: str, account_type: str, period_start: object) -> Path:
@@ -57,7 +106,7 @@ def _resolve_account(
     alias: str,
     clabe: str | None,
     account_number: str | None,
-) -> Account:
+):
     if clabe:
         account = repo.get_by_clabe(clabe)
         if account:
@@ -124,37 +173,33 @@ def _insert_pocket_movements(
     return count
 
 
-def import_pdf(
-    db: Session,
-    path: Path,
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+def import_parsed(
+    parsed: ParsedPdfData,
+    source_path: Path,
     clabe_override: str | None = None,
 ) -> ImportResult | ImportError:
     """
-    Import a bank statement PDF into the database.
+    Persist an already-parsed PDF into the database.
 
     Args:
-        db: Active SQLAlchemy session.
-        path: Path to the PDF file to import.
-        clabe_override: CLABE provided by the user when the parser cannot extract it
-                        (e.g. MercadoPago statements do not print the CLABE).
+        parsed: Result of a previous parse_pdf() call (held in session state).
+        source_path: Original PDF path, used to archive the file.
+        clabe_override: CLABE provided by the user when the bank doesn't print it.
 
     Returns:
         ImportResult on success, ImportError on failure.
     """
-    try:
-        bank, account_type = detect_bank_and_type(path)
-    except ValueError as e:
-        return ImportError(reason=str(e))
-
-    parser = get_parser(bank, account_type)
-
-    if not parser.validate(path):
-        return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
-
-    data: StatementData = parser.parse(path)
-
+    bank = parsed.bank
+    account_type = parsed.account_type
+    data: StatementData = parsed.data
     effective_clabe = clabe_override or data.account.clabe
 
+    db = SessionLocal()
     account_repo = AccountRepository(db)
     txn_repo = TransactionRepository(db)
     pocket_repo = SavingsPocketRepository(db)
@@ -181,7 +226,7 @@ def import_pdf(
                 )
             )
 
-        pdf_path = _store_pdf(path, bank, account_type, data.statement.period_start)
+        pdf_path = _store_pdf(source_path, bank, account_type, data.statement.period_start)
 
         statement = account_repo.create_statement(
             account_id=account.id,
@@ -202,8 +247,9 @@ def import_pdf(
         db.commit()
 
         return ImportResult(
-            account=account,
-            statement=statement,
+            statement_id=statement.id,
+            account_alias=account.alias,
+            bank_label=get_config(bank, account_type).label,
             transactions_inserted=len(txns),
             pocket_movements_inserted=pocket_count,
             pdf_stored_path=pdf_path,
@@ -215,3 +261,5 @@ def import_pdf(
     except Exception as e:
         db.rollback()
         return ImportError(reason=str(e))
+    finally:
+        db.close()

@@ -16,21 +16,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
 
-_BANKS = "nu, bbva, banamex, mercadopago"
 _ACCOUNT_TYPES = "credit, debit"
 
 
 class Account(Base):
     __tablename__ = "accounts"
     __table_args__ = (
-        CheckConstraint("bank IN ('nu', 'bbva', 'banamex', 'mercadopago')", name="ck_account_bank"),
         CheckConstraint("account_type IN ('credit', 'debit')", name="ck_account_type"),
         {"comment": "Catalog of all bank accounts. CLABE is the natural unique identifier."},
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     bank: Mapped[str] = mapped_column(
-        String(20), nullable=False, comment=f"Bank identifier. Valid values: {_BANKS}"
+        String(20),
+        nullable=False,
+        comment="Bank identifier. Valid values defined in parsers/registry.py.",
     )
     account_type: Mapped[str] = mapped_column(
         String(10), nullable=False, comment=f"Account type. Valid values: {_ACCOUNT_TYPES}"

@@ -71,20 +71,21 @@ All commits must follow Conventional Commits. The `commit-msg` pre-commit hook e
 
 **Format:**
 ```
-type(optional-scope): short description
+type(scope): short description
 
 optional body
 
 optional footer
 ```
 
-**Examples:**
-```
-feat(parsers): add MercadoPago PDF parser
-fix(database): correct WAL pragma for concurrent Streamlit access
-build(deps): add pdfplumber and PyMuPDF
-chore: update pre-commit hooks
-```
+**Scope is mandatory** — use the file or class name without extension, in kebab-case:
+- `feat(mercadopago-parser): add pocket movement extraction`
+- `fix(import-view): resolve DetachedInstanceError after session close`
+- `refactor(import-service): replace direct queries with repositories`
+- `chore(gitignore): exclude SQLite WAL files`
+- `docs(agent): update commit convention`
+
+For changes spanning multiple files use the most relevant one, or the layer name (`models`, `views`, `services`, `repositories`, `parsers`).
 
 ## Critical Domain Rules
 

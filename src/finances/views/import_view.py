@@ -1,27 +1,39 @@
+import hashlib
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-from finances.core.database import SessionLocal
-from finances.models.account import Account
-from finances.services.import_service import ImportError, ImportResult, import_pdf
+from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData
+from finances.services.import_service import (
+    get_existing_account,
+    get_statement_transactions,
+    import_parsed,
+    parse_pdf,
+)
+
+_SESSION_KEY = "parsed_pdf"
 
 
-def _clabe_input(bank: str) -> str | None:
-    """Show CLABE input only for banks that don't print it in their statements."""
-    if bank != "mercadopago":
-        return None
+def _get_cached(file_hash: str) -> ParsedPdfData | None:
+    """Return the cached ParsedPdfData if it matches the current file hash."""
+    cached: ParsedPdfData | None = st.session_state.get(_SESSION_KEY)
+    if cached and cached.file_hash == file_hash:
+        return cached
+    return None
 
-    existing = _existing_mp_clabe()
+
+def _clabe_input(parsed: ParsedPdfData) -> str | None:
+    """Render CLABE input for banks that don't print it in their statements."""
+    existing = get_existing_account(parsed.bank, parsed.account_type)
     if existing:
-        st.success(f"Existing MercadoPago account found — CLABE: `{existing}`")
-        use_existing = st.checkbox("Use existing CLABE", value=True)
-        if use_existing:
-            return existing
+        clabe_str, alias = existing
+        st.success(f"Existing account found — **{alias}** · CLABE: `{clabe_str}`")
+        if st.checkbox("Use existing CLABE", value=True):
+            return clabe_str
 
     st.info("MercadoPago statements do not include the CLABE. Enter it below.")
-
     clabe = st.text_input("CLABE (18 digits)", max_chars=18, placeholder="722969XXXXXXXXXXXX")
     if clabe and (not clabe.isdigit() or len(clabe) != 18):
         st.error("CLABE must be exactly 18 digits.")
@@ -29,72 +41,53 @@ def _clabe_input(bank: str) -> str | None:
     return clabe or None
 
 
-def _existing_mp_clabe() -> str | None:
-    """Return the CLABE of an existing MercadoPago account if one is already in the DB."""
-    db = SessionLocal()
-    try:
-        account = db.query(Account).filter_by(bank="mercadopago", account_type="debit").first()
-        return account.clabe if account else None
-    finally:
-        db.close()
-
-
-def _detect_bank(path: Path) -> str | None:
-    """Run bank detection and return the bank name, or None on failure."""
-    from finances.parsers.detector import detect_bank_and_type
-
-    try:
-        bank, _ = detect_bank_and_type(path)
-        return bank
-    except ValueError:
-        return None
-
-
 def render() -> None:
     st.header("Import Statement")
     st.write("Upload a PDF bank statement to import its transactions into the database.")
 
     uploaded = st.file_uploader("Select PDF", type=["pdf"])
-
     if not uploaded:
+        st.session_state.pop(_SESSION_KEY, None)
         return
 
-    # Write to a temp file so pdfplumber can open it by path
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(uploaded.read())
-        tmp_path = Path(tmp.name)
+    # Compute hash from the uploaded bytes to detect file changes without re-parsing
+    raw_bytes = uploaded.read()
+    file_hash = hashlib.md5(raw_bytes).hexdigest()
 
-    # Detect bank early so we can ask for CLABE if needed
-    bank = _detect_bank(tmp_path)
-    if bank is None:
-        st.error("Unrecognized PDF format. Only Nu, BBVA, Banamex and MercadoPago are supported.")
-        tmp_path.unlink(missing_ok=True)
-        return
+    parsed = _get_cached(file_hash)
+    if parsed is None:
+        # First time seeing this file — write to temp and parse once
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = Path(tmp.name)
 
-    bank_labels = {
-        "nu": "Nu",
-        "bbva": "BBVA",
-        "banamex": "Banamex",
-        "mercadopago": "Mercado Pago",
-    }
-    st.info(f"Detected bank: **{bank_labels.get(bank, bank)}**")
+        with st.spinner("Reading PDF…"):
+            result = parse_pdf(tmp_path)
+            tmp_path.unlink(missing_ok=True)
 
-    clabe = _clabe_input(bank)
+        if isinstance(result, ImportError):
+            st.error(f"Could not read PDF: {result.reason}")
+            return
 
-    # For MP, block import until CLABE is provided
-    if bank == "mercadopago" and not clabe:
+        parsed = result
+        st.session_state[_SESSION_KEY] = parsed
+
+    st.info(f"Detected bank: **{parsed.bank_label}**")
+
+    clabe = _clabe_input(parsed) if parsed.needs_clabe else None
+    if parsed.needs_clabe and not clabe:
         st.warning("Provide the CLABE to continue.")
-        tmp_path.unlink(missing_ok=True)
         return
 
     if st.button("Import", type="primary"):
+        # Write to temp again only for archiving — no re-parse
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(raw_bytes)
+            source_path = Path(tmp.name)
+
         with st.spinner("Importing…"):
-            db = SessionLocal()
-            try:
-                result = import_pdf(db, tmp_path, clabe_override=clabe)
-            finally:
-                db.close()
-                tmp_path.unlink(missing_ok=True)
+            result = import_parsed(parsed, source_path, clabe_override=clabe)
+        source_path.unlink(missing_ok=True)
 
         if isinstance(result, ImportError):
             st.error(f"Import failed: {result.reason}")
@@ -102,47 +95,33 @@ def render() -> None:
 
         assert isinstance(result, ImportResult)
         st.success("Import complete!")
+        st.session_state.pop(_SESSION_KEY, None)
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Transactions", result.transactions_inserted)
         col2.metric("Pocket movements", result.pocket_movements_inserted)
         col3.metric("PDF archived", result.pdf_stored_path.name)
-
         st.caption(f"Stored at: `{result.pdf_stored_path}`")
 
-        _show_transactions(result.statement.id)
+        _show_transactions(result.statement_id)
 
 
 def _show_transactions(statement_id: int) -> None:
-    import pandas as pd
-
-    from finances.core.database import SessionLocal
-    from finances.models.transaction import Transaction
-
-    db = SessionLocal()
-    try:
-        txns = (
-            db.query(Transaction)
-            .filter_by(statement_id=statement_id)
-            .order_by(Transaction.date)
-            .all()
-        )
-    finally:
-        db.close()
-
+    txns = get_statement_transactions(statement_id)
     if not txns:
         return
 
     st.subheader("Imported transactions")
-    rows = [
-        {
-            "Date": t.date,
-            "Description": t.description,
-            "Amount (MXN)": float(t.amount),
-            "Type": t.transaction_type,
-            "Reference": t.bank_reference or "",
-        }
-        for t in txns
-    ]
-    df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    df = pd.DataFrame(
+        [
+            {
+                "Date": t.date,
+                "Description": t.description,
+                "Amount (MXN)": float(t.amount),
+                "Type": t.transaction_type,
+                "Reference": t.bank_reference or "",
+            }
+            for t in txns
+        ]
+    )
+    st.dataframe(df, width="stretch", hide_index=True)
