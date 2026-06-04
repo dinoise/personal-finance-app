@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+
 from sqlalchemy.orm import Session
 
 from finances.models.account import Account, Statement
@@ -41,7 +44,7 @@ class AccountRepository:
         self._db.flush()
         return account
 
-    def statement_exists(self, account_id: int, period_start: object, period_end: object) -> bool:
+    def statement_exists(self, account_id: int, period_start: date, period_end: date) -> bool:
         return (
             self._db.query(Statement)
             .filter_by(
@@ -56,13 +59,13 @@ class AccountRepository:
     def create_statement(
         self,
         account_id: int,
-        period_start: object,
-        period_end: object,
+        period_start: date,
+        period_end: date,
         file_path: str,
-        opening_balance: object = None,
-        closing_balance: object = None,
-        payment_due_date: object = None,
-        minimum_payment: object = None,
+        opening_balance: Decimal | None = None,
+        closing_balance: Decimal | None = None,
+        payment_due_date: date | None = None,
+        minimum_payment: Decimal | None = None,
     ) -> Statement:
         statement = Statement(
             account_id=account_id,
