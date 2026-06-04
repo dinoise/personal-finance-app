@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pdfplumber
 
-from finances.parsers.base import (
+from finances.parsers.base import BankParser
+from finances.schemas.parser_schemas import (
     AccountType,
     BankName,
-    BankParser,
     ParsedAccount,
     ParsedPocketMovement,
     ParsedStatement,
@@ -342,7 +342,7 @@ class MercadoPagoParser(BankParser):
                     date=_parse_date(date_str),
                     description=description,
                     amount=amount,
-                    transaction_type=_infer_type(amount),  # type: ignore[arg-type]
+                    transaction_type=_infer_type(amount),
                     bank_reference=op_id,
                 )
             )

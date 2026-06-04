@@ -5,10 +5,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData
 from finances.services.import_service import (
-    ImportError,
-    ImportResult,
-    ParsedPdfData,
     get_existing_account,
     get_statement_transactions,
     import_parsed,

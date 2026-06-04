@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pdfplumber
 
-from finances.parsers.base import AccountType, BankName
+from finances.schemas.parser_schemas import AccountType, BankName
 
 # (signature, bank, account_type) — order matters: more specific signatures first
 _SIGNATURES: list[tuple[str, BankName, AccountType]] = [

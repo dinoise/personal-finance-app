@@ -1,66 +1,14 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import date
-from decimal import Decimal
 from pathlib import Path
-from typing import Literal
 
-BankName = Literal["nu", "bbva", "banamex", "mercadopago"]
-AccountType = Literal["credit", "debit"]
-TransactionType = Literal["charge", "payment", "refund", "interest"]
-PocketMovementType = Literal["deposit", "withdrawal", "interest"]
-
-
-@dataclass
-class ParsedAccount:
-    bank: BankName
-    account_type: AccountType
-    alias: str
-    clabe: str | None = None
-    account_number: str | None = None
-    last4: str | None = None
-    credit_limit: Decimal | None = None
-
-
-@dataclass
-class ParsedStatement:
-    period_start: date
-    period_end: date
-    payment_due_date: date | None = None
-    opening_balance: Decimal | None = None
-    closing_balance: Decimal | None = None
-    minimum_payment: Decimal | None = None
-
-
-@dataclass
-class ParsedTransaction:
-    date: date
-    description: str
-    amount: Decimal
-    transaction_type: TransactionType
-    bank_reference: str | None = None
-    spei_tracking_key: str | None = None
-    spei_reference: str | None = None
-    counterpart_clabe: str | None = None
-    counterpart_name: str | None = None
-    currency: str = "MXN"
-
-
-@dataclass
-class ParsedPocketMovement:
-    pocket_name: str
-    movement_type: PocketMovementType
-    amount: Decimal
-    # Index into the transactions list of the originating transaction
-    transaction_index: int
-
-
-@dataclass
-class StatementData:
-    account: ParsedAccount
-    statement: ParsedStatement
-    transactions: list[ParsedTransaction] = field(default_factory=list)
-    pocket_movements: list[ParsedPocketMovement] = field(default_factory=list)
+from finances.schemas.parser_schemas import (
+    AccountType,
+    BankName,
+    ParsedAccount,
+    ParsedStatement,
+    ParsedTransaction,
+    StatementData,
+)
 
 
 class BankParser(ABC):

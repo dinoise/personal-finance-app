@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from finances.parsers.base import (
+from finances.parsers.base import BankParser
+from finances.schemas.parser_schemas import (
     AccountType,
     BankName,
-    BankParser,
     ParsedAccount,
     ParsedStatement,
     ParsedTransaction,
@@ -13,11 +13,11 @@ from finances.parsers.base import (
 class BBVADebitParser(BankParser):
     @property
     def bank_name(self) -> BankName:
-        return "bbva"  # type: ignore[return-value]
+        return "bbva"
 
     @property
     def account_type(self) -> AccountType:
-        return "debit"  # type: ignore[return-value]
+        return "debit"
 
     def validate(self, path: Path) -> bool:
         raise NotImplementedError

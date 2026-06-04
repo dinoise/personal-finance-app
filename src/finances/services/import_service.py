@@ -11,21 +11,19 @@ Flow:
 
 import hashlib
 import shutil
-from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
 
 from finances.core.config import settings
 from finances.core.database import SessionLocal
-from finances.parsers.base import ParsedPocketMovement, ParsedTransaction, StatementData
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
 from finances.repositories.account_repository import AccountRepository
 from finances.repositories.savings_pocket_repository import SavingsPocketRepository
 from finances.repositories.transaction_repository import TransactionRepository
+from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData, TransactionRow
+from finances.schemas.parser_schemas import ParsedPocketMovement, ParsedTransaction, StatementData
 
 _BANK_LABELS: dict[str, str] = {
     "nu": "Nu",
@@ -33,57 +31,6 @@ _BANK_LABELS: dict[str, str] = {
     "banamex": "Banamex",
     "mercadopago": "Mercado Pago",
 }
-
-
-# ---------------------------------------------------------------------------
-# Public result / error types (only primitives — no ORM objects)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ParsedPdfData:
-    """Intermediate object holding the full parse result for a single PDF.
-
-    Stored in st.session_state so the PDF is opened and parsed only once.
-    file_hash is used to detect if the user swapped the uploaded file.
-    """
-
-    bank: str
-    account_type: str
-    file_hash: str
-    data: StatementData
-
-    @property
-    def bank_label(self) -> str:
-        return _BANK_LABELS.get(self.bank, self.bank)
-
-    @property
-    def needs_clabe(self) -> bool:
-        return self.bank == "mercadopago"
-
-
-@dataclass
-class ImportResult:
-    statement_id: int
-    account_alias: str
-    bank_label: str
-    transactions_inserted: int
-    pocket_movements_inserted: int
-    pdf_stored_path: Path
-
-
-@dataclass
-class ImportError:
-    reason: str
-
-
-@dataclass
-class TransactionRow:
-    date: date
-    description: str
-    amount: Decimal
-    transaction_type: str
-    bank_reference: str | None
 
 
 # ---------------------------------------------------------------------------

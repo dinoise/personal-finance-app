@@ -1,4 +1,5 @@
-from finances.parsers.base import AccountType, BankName, BankParser
+from finances.parsers.base import BankParser
+from finances.schemas.parser_schemas import AccountType, BankName
 
 
 def get_parser(bank: BankName, account_type: AccountType) -> BankParser:
