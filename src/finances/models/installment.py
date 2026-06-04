@@ -89,8 +89,7 @@ class Installment(Base):
     )
 
     plan: Mapped["InstallmentPlan"] = relationship(back_populates="installments")
+    transaction: Mapped["Transaction | None"] = relationship()  # type: ignore[name-defined]
 
 
 from finances.models.transaction import Transaction  # noqa: E402
-
-Installment.transaction: Mapped["Transaction | None"] = relationship()  # type: ignore[assignment]
