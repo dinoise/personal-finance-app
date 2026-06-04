@@ -15,10 +15,11 @@ def _clabe_input(bank: str) -> str | None:
 
     existing = _existing_mp_clabe()
     if existing:
-        st.success(f"Existing MercadoPago account found — CLABE: `{existing}`")
+        clabe_str, alias = existing
+        st.success(f"Existing MercadoPago account found — **{alias}** · CLABE: `{clabe_str}`")
         use_existing = st.checkbox("Use existing CLABE", value=True)
         if use_existing:
-            return existing
+            return clabe_str
 
     st.info("MercadoPago statements do not include the CLABE. Enter it below.")
 
@@ -29,12 +30,14 @@ def _clabe_input(bank: str) -> str | None:
     return clabe or None
 
 
-def _existing_mp_clabe() -> str | None:
-    """Return the CLABE of an existing MercadoPago account if one is already in the DB."""
+def _existing_mp_clabe() -> tuple[str, str] | None:
+    """Return (clabe, alias) of an existing MercadoPago account, or None."""
     db = SessionLocal()
     try:
         account = db.query(Account).filter_by(bank="mercadopago", account_type="debit").first()
-        return account.clabe if account else None
+        if account and account.clabe:
+            return account.clabe, account.alias
+        return None
     finally:
         db.close()
 
@@ -92,6 +95,14 @@ def render() -> None:
             db = SessionLocal()
             try:
                 result = import_pdf(db, tmp_path, clabe_override=clabe)
+                # Extract primitive values before closing the session to avoid
+                # DetachedInstanceError when accessing ORM attributes later.
+                if isinstance(result, ImportResult):
+                    statement_id = result.statement.id
+                    pdf_name = result.pdf_stored_path.name
+                    pdf_path = result.pdf_stored_path
+                    txns_count = result.transactions_inserted
+                    pockets_count = result.pocket_movements_inserted
             finally:
                 db.close()
                 tmp_path.unlink(missing_ok=True)
@@ -100,33 +111,26 @@ def render() -> None:
             st.error(f"Import failed: {result.reason}")
             return
 
-        assert isinstance(result, ImportResult)
         st.success("Import complete!")
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Transactions", result.transactions_inserted)
-        col2.metric("Pocket movements", result.pocket_movements_inserted)
-        col3.metric("PDF archived", result.pdf_stored_path.name)
+        col1.metric("Transactions", txns_count)
+        col2.metric("Pocket movements", pockets_count)
+        col3.metric("PDF archived", pdf_name)
 
-        st.caption(f"Stored at: `{result.pdf_stored_path}`")
+        st.caption(f"Stored at: `{pdf_path}`")
 
-        _show_transactions(result.statement.id)
+        _show_transactions(statement_id)
 
 
 def _show_transactions(statement_id: int) -> None:
     import pandas as pd
 
-    from finances.core.database import SessionLocal
-    from finances.models.transaction import Transaction
+    from finances.repositories.transaction_repository import TransactionRepository
 
     db = SessionLocal()
     try:
-        txns = (
-            db.query(Transaction)
-            .filter_by(statement_id=statement_id)
-            .order_by(Transaction.date)
-            .all()
-        )
+        txns = TransactionRepository(db).get_by_statement(statement_id)
     finally:
         db.close()
 
@@ -145,4 +149,4 @@ def _show_transactions(statement_id: int) -> None:
         for t in txns
     ]
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
