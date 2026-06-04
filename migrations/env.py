@@ -11,6 +11,8 @@ from finances.models import (  # noqa: F401 — registers all models with Base.m
     Installment,
     InstallmentPlan,
     Label,
+    SavingsPocket,
+    SavingsPocketMovement,
     Statement,
     Transaction,
     Transfer,
