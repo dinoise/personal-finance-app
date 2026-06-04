@@ -1,3 +1,18 @@
+## v0.5.0 (2026-06-04)
+
+### Feat
+
+- **registry**: centralize bank metadata in BankConfig registry
+- **schemas**: add parser_schemas and import_schemas modules
+
+### Fix
+
+- **views**: resolve DetachedInstanceError and Account object type mismatch in import view
+
+### Refactor
+
+- **services,views**: move all business logic and queries out of import view
+
 ## v0.4.0 (2026-06-04)
 
 ### Feat
