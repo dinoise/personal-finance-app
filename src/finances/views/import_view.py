@@ -13,17 +13,14 @@ def _clabe_input(bank: str) -> str | None:
     if bank != "mercadopago":
         return None
 
-    st.info(
-        "MercadoPago statements do not include the CLABE. "
-        "Enter it below — it can be found in your Nu Débito SPEI deposit history."
-    )
-
     existing = _existing_mp_clabe()
     if existing:
         st.success(f"Existing MercadoPago account found — CLABE: `{existing}`")
         use_existing = st.checkbox("Use existing CLABE", value=True)
         if use_existing:
             return existing
+
+    st.info("MercadoPago statements do not include the CLABE. Enter it below.")
 
     clabe = st.text_input("CLABE (18 digits)", max_chars=18, placeholder="722969XXXXXXXXXXXX")
     if clabe and (not clabe.isdigit() or len(clabe) != 18):
