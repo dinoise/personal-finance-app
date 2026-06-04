@@ -1,28 +1,33 @@
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-from finances.core.database import SessionLocal
-from finances.models.account import Account
-from finances.services.import_service import ImportError, ImportResult, import_pdf
+from finances.services.import_service import (
+    ImportError,
+    ImportResult,
+    detect_bank_label,
+    get_existing_account,
+    get_statement_transactions,
+    import_pdf,
+    needs_clabe,
+)
 
 
-def _clabe_input(bank: str) -> str | None:
-    """Show CLABE input only for banks that don't print it in their statements."""
-    if bank != "mercadopago":
+def _clabe_input(path: Path, bank_raw: str) -> str | None:
+    """Render CLABE input for banks that don't print it in their statements."""
+    if not needs_clabe(path):
         return None
 
-    existing = _existing_mp_clabe()
+    existing = get_existing_account(bank_raw, "debit")
     if existing:
         clabe_str, alias = existing
-        st.success(f"Existing MercadoPago account found — **{alias}** · CLABE: `{clabe_str}`")
-        use_existing = st.checkbox("Use existing CLABE", value=True)
-        if use_existing:
+        st.success(f"Existing account found — **{alias}** · CLABE: `{clabe_str}`")
+        if st.checkbox("Use existing CLABE", value=True):
             return clabe_str
 
     st.info("MercadoPago statements do not include the CLABE. Enter it below.")
-
     clabe = st.text_input("CLABE (18 digits)", max_chars=18, placeholder="722969XXXXXXXXXXXX")
     if clabe and (not clabe.isdigit() or len(clabe) != 18):
         st.error("CLABE must be exactly 18 digits.")
@@ -30,123 +35,77 @@ def _clabe_input(bank: str) -> str | None:
     return clabe or None
 
 
-def _existing_mp_clabe() -> tuple[str, str] | None:
-    """Return (clabe, alias) of an existing MercadoPago account, or None."""
-    db = SessionLocal()
-    try:
-        account = db.query(Account).filter_by(bank="mercadopago", account_type="debit").first()
-        if account and account.clabe:
-            return account.clabe, account.alias
-        return None
-    finally:
-        db.close()
-
-
-def _detect_bank(path: Path) -> str | None:
-    """Run bank detection and return the bank name, or None on failure."""
-    from finances.parsers.detector import detect_bank_and_type
-
-    try:
-        bank, _ = detect_bank_and_type(path)
-        return bank
-    except ValueError:
-        return None
-
-
 def render() -> None:
     st.header("Import Statement")
     st.write("Upload a PDF bank statement to import its transactions into the database.")
 
     uploaded = st.file_uploader("Select PDF", type=["pdf"])
-
     if not uploaded:
         return
 
-    # Write to a temp file so pdfplumber can open it by path
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(uploaded.read())
         tmp_path = Path(tmp.name)
 
-    # Detect bank early so we can ask for CLABE if needed
-    bank = _detect_bank(tmp_path)
-    if bank is None:
-        st.error("Unrecognized PDF format. Only Nu, BBVA, Banamex and MercadoPago are supported.")
+    bank_label = detect_bank_label(tmp_path)
+    if bank_label is None:
+        st.error("Unrecognized PDF. Only Nu, BBVA, Banamex and MercadoPago are supported.")
         tmp_path.unlink(missing_ok=True)
         return
 
-    bank_labels = {
-        "nu": "Nu",
-        "bbva": "BBVA",
-        "banamex": "Banamex",
-        "mercadopago": "Mercado Pago",
+    st.info(f"Detected bank: **{bank_label}**")
+
+    _label_to_key = {
+        "Nu": "nu",
+        "BBVA": "bbva",
+        "Banamex": "banamex",
+        "Mercado Pago": "mercadopago",
     }
-    st.info(f"Detected bank: **{bank_labels.get(bank, bank)}**")
+    bank_raw = _label_to_key.get(bank_label, bank_label.lower())
 
-    clabe = _clabe_input(bank)
-
-    # For MP, block import until CLABE is provided
-    if bank == "mercadopago" and not clabe:
+    clabe = _clabe_input(tmp_path, bank_raw)
+    if needs_clabe(tmp_path) and not clabe:
         st.warning("Provide the CLABE to continue.")
         tmp_path.unlink(missing_ok=True)
         return
 
     if st.button("Import", type="primary"):
         with st.spinner("Importing…"):
-            db = SessionLocal()
-            try:
-                result = import_pdf(db, tmp_path, clabe_override=clabe)
-                # Extract primitive values before closing the session to avoid
-                # DetachedInstanceError when accessing ORM attributes later.
-                if isinstance(result, ImportResult):
-                    statement_id = result.statement.id
-                    pdf_name = result.pdf_stored_path.name
-                    pdf_path = result.pdf_stored_path
-                    txns_count = result.transactions_inserted
-                    pockets_count = result.pocket_movements_inserted
-            finally:
-                db.close()
-                tmp_path.unlink(missing_ok=True)
+            result = import_pdf(tmp_path, clabe_override=clabe)
+        tmp_path.unlink(missing_ok=True)
 
         if isinstance(result, ImportError):
             st.error(f"Import failed: {result.reason}")
             return
 
+        assert isinstance(result, ImportResult)
         st.success("Import complete!")
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Transactions", txns_count)
-        col2.metric("Pocket movements", pockets_count)
-        col3.metric("PDF archived", pdf_name)
+        col1.metric("Transactions", result.transactions_inserted)
+        col2.metric("Pocket movements", result.pocket_movements_inserted)
+        col3.metric("PDF archived", result.pdf_stored_path.name)
+        st.caption(f"Stored at: `{result.pdf_stored_path}`")
 
-        st.caption(f"Stored at: `{pdf_path}`")
-
-        _show_transactions(statement_id)
+        _show_transactions(result.statement_id)
 
 
 def _show_transactions(statement_id: int) -> None:
-    import pandas as pd
-
-    from finances.repositories.transaction_repository import TransactionRepository
-
-    db = SessionLocal()
-    try:
-        txns = TransactionRepository(db).get_by_statement(statement_id)
-    finally:
-        db.close()
-
+    txns = get_statement_transactions(statement_id)
     if not txns:
         return
 
     st.subheader("Imported transactions")
-    rows = [
-        {
-            "Date": t.date,
-            "Description": t.description,
-            "Amount (MXN)": float(t.amount),
-            "Type": t.transaction_type,
-            "Reference": t.bank_reference or "",
-        }
-        for t in txns
-    ]
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(
+        [
+            {
+                "Date": t.date,
+                "Description": t.description,
+                "Amount (MXN)": float(t.amount),
+                "Type": t.transaction_type,
+                "Reference": t.bank_reference or "",
+            }
+            for t in txns
+        ]
+    )
     st.dataframe(df, width="stretch", hide_index=True)

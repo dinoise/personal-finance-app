@@ -11,13 +11,14 @@ Flow:
 
 import shutil
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from finances.core.config import settings
-from finances.models.account import Account, Statement
+from finances.core.database import SessionLocal
 from finances.parsers.base import ParsedPocketMovement, ParsedTransaction, StatementData
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
@@ -25,11 +26,24 @@ from finances.repositories.account_repository import AccountRepository
 from finances.repositories.savings_pocket_repository import SavingsPocketRepository
 from finances.repositories.transaction_repository import TransactionRepository
 
+_BANK_LABELS: dict[str, str] = {
+    "nu": "Nu",
+    "bbva": "BBVA",
+    "banamex": "Banamex",
+    "mercadopago": "Mercado Pago",
+}
+
+
+# ---------------------------------------------------------------------------
+# Public result / error types (only primitives — no ORM objects)
+# ---------------------------------------------------------------------------
+
 
 @dataclass
 class ImportResult:
-    account: Account
-    statement: Statement
+    statement_id: int
+    account_alias: str
+    bank_label: str
     transactions_inserted: int
     pocket_movements_inserted: int
     pdf_stored_path: Path
@@ -38,6 +52,78 @@ class ImportResult:
 @dataclass
 class ImportError:
     reason: str
+
+
+@dataclass
+class TransactionRow:
+    date: date
+    description: str
+    amount: Decimal
+    transaction_type: str
+    bank_reference: str | None
+
+
+# ---------------------------------------------------------------------------
+# Public query helpers (called by views before/after import)
+# ---------------------------------------------------------------------------
+
+
+def detect_bank_label(path: Path) -> str | None:
+    """Return the human-readable bank label detected from the PDF, or None."""
+    try:
+        bank, _ = detect_bank_and_type(path)
+        return _BANK_LABELS.get(bank, bank)
+    except ValueError:
+        return None
+
+
+def needs_clabe(path: Path) -> bool:
+    """Return True if the detected bank requires the user to supply a CLABE."""
+    try:
+        bank, _ = detect_bank_and_type(path)
+        return bank == "mercadopago"
+    except ValueError:
+        return False
+
+
+def get_existing_account(bank: str, account_type: str) -> tuple[str, str] | None:
+    """
+    Return (clabe, alias) for an existing account of the given bank/type, or None.
+    Used by the view to offer re-use of a known CLABE.
+    """
+    db = SessionLocal()
+    try:
+        repo = AccountRepository(db)
+        account = repo.get_by_bank(bank, account_type)
+        if account and account.clabe:
+            return account.clabe, account.alias
+        return None
+    finally:
+        db.close()
+
+
+def get_statement_transactions(statement_id: int) -> list[TransactionRow]:
+    """Return all transactions for a statement as plain dataclass rows."""
+    db = SessionLocal()
+    try:
+        txns = TransactionRepository(db).get_by_statement(statement_id)
+        return [
+            TransactionRow(
+                date=t.date,
+                description=t.description,
+                amount=t.amount,
+                transaction_type=t.transaction_type,
+                bank_reference=t.bank_reference,
+            )
+            for t in txns
+        ]
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _store_pdf(src: Path, bank: str, account_type: str, period_start: object) -> Path:
@@ -57,7 +143,7 @@ def _resolve_account(
     alias: str,
     clabe: str | None,
     account_number: str | None,
-) -> Account:
+):
     if clabe:
         account = repo.get_by_clabe(clabe)
         if account:
@@ -124,8 +210,12 @@ def _insert_pocket_movements(
     return count
 
 
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
 def import_pdf(
-    db: Session,
     path: Path,
     clabe_override: str | None = None,
 ) -> ImportResult | ImportError:
@@ -133,7 +223,6 @@ def import_pdf(
     Import a bank statement PDF into the database.
 
     Args:
-        db: Active SQLAlchemy session.
         path: Path to the PDF file to import.
         clabe_override: CLABE provided by the user when the parser cannot extract it
                         (e.g. MercadoPago statements do not print the CLABE).
@@ -152,9 +241,9 @@ def import_pdf(
         return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
 
     data: StatementData = parser.parse(path)
-
     effective_clabe = clabe_override or data.account.clabe
 
+    db = SessionLocal()
     account_repo = AccountRepository(db)
     txn_repo = TransactionRepository(db)
     pocket_repo = SavingsPocketRepository(db)
@@ -202,8 +291,9 @@ def import_pdf(
         db.commit()
 
         return ImportResult(
-            account=account,
-            statement=statement,
+            statement_id=statement.id,
+            account_alias=account.alias,
+            bank_label=_BANK_LABELS.get(bank, bank),
             transactions_inserted=len(txns),
             pocket_movements_inserted=pocket_count,
             pdf_stored_path=pdf_path,
@@ -215,3 +305,5 @@ def import_pdf(
     except Exception as e:
         db.rollback()
         return ImportError(reason=str(e))
+    finally:
+        db.close()
