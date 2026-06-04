@@ -5,13 +5,6 @@ from pathlib import Path
 
 from finances.schemas.parser_schemas import AccountType, BankName, StatementData
 
-_BANK_LABELS: dict[str, str] = {
-    "nu": "Nu",
-    "bbva": "BBVA",
-    "banamex": "Banamex",
-    "mercadopago": "Mercado Pago",
-}
-
 
 @dataclass
 class ParsedPdfData:
@@ -24,11 +17,15 @@ class ParsedPdfData:
 
     @property
     def bank_label(self) -> str:
-        return _BANK_LABELS.get(self.bank, self.bank)
+        from finances.parsers.registry import get_config
+
+        return get_config(self.bank, self.account_type).label
 
     @property
     def needs_clabe(self) -> bool:
-        return self.bank == "mercadopago"
+        from finances.parsers.registry import get_config
+
+        return get_config(self.bank, self.account_type).needs_clabe
 
 
 @dataclass

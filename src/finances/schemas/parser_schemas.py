@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-BankName = Literal["nu", "bbva", "banamex", "mercadopago"]
+# Valid values defined in parsers/registry.py — add a BankConfig there to support a new bank.
+BankName = str
 AccountType = Literal["credit", "debit"]
 TransactionType = Literal["charge", "payment", "refund", "interest"]
 PocketMovementType = Literal["deposit", "withdrawal", "interest"]

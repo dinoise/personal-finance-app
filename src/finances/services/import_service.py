@@ -19,19 +19,12 @@ from finances.core.config import settings
 from finances.core.database import SessionLocal
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
+from finances.parsers.registry import get_config
 from finances.repositories.account_repository import AccountRepository
 from finances.repositories.savings_pocket_repository import SavingsPocketRepository
 from finances.repositories.transaction_repository import TransactionRepository
 from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData, TransactionRow
 from finances.schemas.parser_schemas import ParsedPocketMovement, ParsedTransaction, StatementData
-
-_BANK_LABELS: dict[str, str] = {
-    "nu": "Nu",
-    "bbva": "BBVA",
-    "banamex": "Banamex",
-    "mercadopago": "Mercado Pago",
-}
-
 
 # ---------------------------------------------------------------------------
 # Public helpers
@@ -256,7 +249,7 @@ def import_parsed(
         return ImportResult(
             statement_id=statement.id,
             account_alias=account.alias,
-            bank_label=_BANK_LABELS.get(bank, bank),
+            bank_label=get_config(bank, account_type).label,
             transactions_inserted=len(txns),
             pocket_movements_inserted=pocket_count,
             pdf_stored_path=pdf_path,
