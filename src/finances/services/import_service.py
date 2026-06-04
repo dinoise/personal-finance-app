@@ -18,15 +18,12 @@ from sqlalchemy.orm import Session
 
 from finances.core.config import settings
 from finances.models.account import Account, Statement
-from finances.models.savings_pocket import SavingsPocket, SavingsPocketMovement
-from finances.models.transaction import Transaction
 from finances.parsers.base import ParsedPocketMovement, ParsedTransaction, StatementData
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
-
-# ---------------------------------------------------------------------------
-# Public result types
-# ---------------------------------------------------------------------------
+from finances.repositories.account_repository import AccountRepository
+from finances.repositories.savings_pocket_repository import SavingsPocketRepository
+from finances.repositories.transaction_repository import TransactionRepository
 
 
 @dataclass
@@ -43,20 +40,9 @@ class ImportError:
     reason: str
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _statements_dir(bank: str, account_type: str) -> Path:
-    path = settings.data_dir / "statements" / bank / account_type
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 def _store_pdf(src: Path, bank: str, account_type: str, period_start: object) -> Path:
-    """Copy PDF to data/statements/<bank>/<type>/ with a normalized filename."""
-    dest_dir = _statements_dir(bank, account_type)
+    dest_dir = settings.data_dir / "statements" / bank / account_type
+    dest_dir.mkdir(parents=True, exist_ok=True)
     period_str = str(period_start)[:7]  # YYYY-MM
     dest = dest_dir / f"{bank}_{account_type}_{period_str}.pdf"
     if not dest.exists():
@@ -65,131 +51,77 @@ def _store_pdf(src: Path, bank: str, account_type: str, period_start: object) ->
 
 
 def _resolve_account(
-    db: Session,
+    repo: AccountRepository,
     bank: str,
     account_type: str,
-    account_number: str | None,
     alias: str,
     clabe: str | None,
+    account_number: str | None,
 ) -> Account:
-    """Return existing Account or create a new one."""
-    account: Account | None = None
-
     if clabe:
-        account = db.query(Account).filter_by(clabe=clabe).first()
+        account = repo.get_by_clabe(clabe)
+        if account:
+            return account
 
-    if account is None and account_number:
-        account = (
-            db.query(Account)
-            .filter_by(bank=bank, account_type=account_type, account_number=account_number)
-            .first()
-        )
+    if account_number:
+        account = repo.get_by_bank_and_number(bank, account_type, account_number)
+        if account:
+            return account
 
-    if account is None:
-        account = Account(
-            bank=bank,
-            account_type=account_type,
-            alias=alias,
-            clabe=clabe,
-            account_number=account_number,
-        )
-        db.add(account)
-        db.flush()
-
-    return account
-
-
-def _is_duplicate_statement(db: Session, account_id: int, data: StatementData) -> bool:
-    return (
-        db.query(Statement)
-        .filter_by(
-            account_id=account_id,
-            period_start=data.statement.period_start,
-            period_end=data.statement.period_end,
-        )
-        .first()
-        is not None
+    return repo.create(
+        bank=bank,
+        account_type=account_type,
+        alias=alias,
+        clabe=clabe,
+        account_number=account_number,
     )
 
 
 def _insert_transactions(
-    db: Session,
+    repo: TransactionRepository,
     account_id: int,
     statement_id: int,
     parsed: list[ParsedTransaction],
-) -> tuple[list[Transaction], int]:
-    """Insert transactions, skipping duplicates by (statement_id, bank_reference, amount)."""
-    inserted: list[Transaction] = []
-    skipped = 0
-
+) -> list:
+    result = []
     for p in parsed:
-        exists = (
-            db.query(Transaction)
-            .filter_by(
-                statement_id=statement_id,
-                bank_reference=p.bank_reference,
-                amount=p.amount,
-            )
-            .first()
-        )
-        if exists:
-            inserted.append(exists)
-            skipped += 1
+        existing = repo.exists(statement_id, p.bank_reference, p.amount)
+        if existing:
+            result.append(existing)
             continue
-
-        txn = Transaction(
+        txn = repo.create(
             account_id=account_id,
             statement_id=statement_id,
             date=p.date,
             description=p.description,
             amount=p.amount,
-            amount_mxn=p.amount,  # all MercadoPago transactions are MXN
+            amount_mxn=p.amount,
             currency=p.currency,
             transaction_type=p.transaction_type,
             bank_reference=p.bank_reference,
         )
-        db.add(txn)
-        db.flush()
-        inserted.append(txn)
-
-    return inserted, skipped
+        result.append(txn)
+    return result
 
 
 def _insert_pocket_movements(
-    db: Session,
+    repo: SavingsPocketRepository,
     account_id: int,
-    transactions: list[Transaction],
+    transactions: list,
     movements: list[ParsedPocketMovement],
 ) -> int:
-    inserted = 0
-
+    count = 0
     for pm in movements:
         txn = transactions[pm.transaction_index]
-
-        # Resolve or create the pocket
-        pocket = (
-            db.query(SavingsPocket).filter_by(account_id=account_id, name=pm.pocket_name).first()
-        )
-        if pocket is None:
-            pocket = SavingsPocket(account_id=account_id, name=pm.pocket_name)
-            db.add(pocket)
-            db.flush()
-
-        movement = SavingsPocketMovement(
+        pocket = repo.get_or_create(account_id, pm.pocket_name)
+        repo.create_movement(
             pocket_id=pocket.id,
             transaction_id=txn.id,
             movement_type=pm.movement_type,
             amount=pm.amount,
         )
-        db.add(movement)
-        inserted += 1
-
-    return inserted
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+        count += 1
+    return count
 
 
 def import_pdf(
@@ -221,20 +153,25 @@ def import_pdf(
 
     data: StatementData = parser.parse(path)
 
-    # Use caller-supplied CLABE when the parser cannot extract one
     effective_clabe = clabe_override or data.account.clabe
+
+    account_repo = AccountRepository(db)
+    txn_repo = TransactionRepository(db)
+    pocket_repo = SavingsPocketRepository(db)
 
     try:
         account = _resolve_account(
-            db,
+            account_repo,
             bank=bank,
             account_type=account_type,
-            account_number=data.account.account_number,
             alias=data.account.alias,
             clabe=effective_clabe,
+            account_number=data.account.account_number,
         )
 
-        if _is_duplicate_statement(db, account.id, data):
+        if account_repo.statement_exists(
+            account.id, data.statement.period_start, data.statement.period_end
+        ):
             db.rollback()
             return ImportError(
                 reason=(
@@ -246,21 +183,21 @@ def import_pdf(
 
         pdf_path = _store_pdf(path, bank, account_type, data.statement.period_start)
 
-        statement = Statement(
+        statement = account_repo.create_statement(
             account_id=account.id,
             period_start=data.statement.period_start,
             period_end=data.statement.period_end,
+            file_path=str(pdf_path),
             opening_balance=data.statement.opening_balance,
             closing_balance=data.statement.closing_balance,
             payment_due_date=data.statement.payment_due_date,
             minimum_payment=data.statement.minimum_payment,
-            file_path=str(pdf_path),
         )
-        db.add(statement)
-        db.flush()
 
-        txns, _ = _insert_transactions(db, account.id, statement.id, data.transactions)
-        pocket_count = _insert_pocket_movements(db, account.id, txns, data.pocket_movements)
+        txns = _insert_transactions(txn_repo, account.id, statement.id, data.transactions)
+        pocket_count = _insert_pocket_movements(
+            pocket_repo, account.id, txns, data.pocket_movements
+        )
 
         db.commit()
 
