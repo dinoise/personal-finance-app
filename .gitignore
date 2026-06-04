@@ -15,6 +15,7 @@ wheels/
 !.env.example
 
 # Financial data — never commit real data
+data/statements/
 data/*.db
 data/*.db-wal
 data/*.db-shm
