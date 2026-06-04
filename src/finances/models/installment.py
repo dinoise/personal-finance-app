@@ -55,7 +55,7 @@ class InstallmentPlan(Base):
     )
 
     installments: Mapped[list["Installment"]] = relationship(back_populates="plan")
-    transactions: Mapped[list["Transaction"]] = relationship(back_populates="installment_plan")  # type: ignore[name-defined]
+    transactions: Mapped[list["Transaction"]] = relationship(back_populates="installment_plan")
 
 
 class Installment(Base):
@@ -89,7 +89,7 @@ class Installment(Base):
     )
 
     plan: Mapped["InstallmentPlan"] = relationship(back_populates="installments")
-    transaction: Mapped["Transaction | None"] = relationship()  # type: ignore[name-defined]
+    transaction: Mapped["Transaction | None"] = relationship()
 
 
 from finances.models.transaction import Transaction  # noqa: E402

@@ -37,7 +37,7 @@ class SavingsPocket(Base):
         comment="False when the pocket has been closed by the user.",
     )
 
-    account: Mapped["Account"] = relationship(back_populates="savings_pockets")  # type: ignore[name-defined]
+    account: Mapped["Account"] = relationship(back_populates="savings_pockets")
     movements: Mapped[list["SavingsPocketMovement"]] = relationship(back_populates="pocket")
 
 
@@ -85,7 +85,7 @@ class SavingsPocketMovement(Base):
     )
 
     pocket: Mapped["SavingsPocket"] = relationship(back_populates="movements")
-    transaction: Mapped["Transaction"] = relationship()  # type: ignore[name-defined]
+    transaction: Mapped["Transaction"] = relationship()
 
 
 from finances.models.account import Account  # noqa: E402

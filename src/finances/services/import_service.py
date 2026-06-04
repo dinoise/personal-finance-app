@@ -17,6 +17,8 @@ from sqlalchemy.exc import IntegrityError
 
 from finances.core.config import settings
 from finances.core.database import SessionLocal
+from finances.models.account import Account
+from finances.models.transaction import Transaction
 from finances.parsers.detector import detect_bank_and_type
 from finances.parsers.factory import get_parser
 from finances.parsers.registry import get_config
@@ -106,7 +108,7 @@ def _resolve_account(
     alias: str,
     clabe: str | None,
     account_number: str | None,
-):
+) -> Account:
     if clabe:
         account = repo.get_by_clabe(clabe)
         if account:
@@ -131,7 +133,7 @@ def _insert_transactions(
     account_id: int,
     statement_id: int,
     parsed: list[ParsedTransaction],
-) -> list:
+) -> list[Transaction]:
     result = []
     for p in parsed:
         existing = repo.exists(statement_id, p.bank_reference, p.amount)
@@ -156,7 +158,7 @@ def _insert_transactions(
 def _insert_pocket_movements(
     repo: SavingsPocketRepository,
     account_id: int,
-    transactions: list,
+    transactions: list[Transaction],
     movements: list[ParsedPocketMovement],
 ) -> int:
     count = 0

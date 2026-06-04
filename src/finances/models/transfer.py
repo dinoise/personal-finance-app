@@ -86,8 +86,8 @@ class Transfer(Base):
     )
     date: Mapped[date] = mapped_column(Date, nullable=False, comment="Transfer date.")
 
-    from_account: Mapped["Account | None"] = relationship(foreign_keys=[from_account_id])  # type: ignore[name-defined]
-    to_account: Mapped["Account | None"] = relationship(foreign_keys=[to_account_id])  # type: ignore[name-defined]
+    from_account: Mapped["Account | None"] = relationship(foreign_keys=[from_account_id])
+    to_account: Mapped["Account | None"] = relationship(foreign_keys=[to_account_id])
 
 
 from finances.models.account import Account  # noqa: E402

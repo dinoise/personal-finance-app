@@ -143,10 +143,10 @@ class Transaction(Base):
         ),
     )
 
-    account: Mapped["Account"] = relationship(back_populates="transactions")  # type: ignore[name-defined]
-    statement: Mapped["Statement"] = relationship(back_populates="transactions")  # type: ignore[name-defined]
+    account: Mapped["Account"] = relationship(back_populates="transactions")
+    statement: Mapped["Statement"] = relationship(back_populates="transactions")
     category: Mapped["Category | None"] = relationship(back_populates="transactions")
-    installment_plan: Mapped["InstallmentPlan | None"] = relationship(back_populates="transactions")  # type: ignore[name-defined]
+    installment_plan: Mapped["InstallmentPlan | None"] = relationship(back_populates="transactions")
 
 
 from finances.models.account import Account, Statement  # noqa: E402

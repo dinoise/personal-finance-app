@@ -2,6 +2,7 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 import pdfplumber
 
@@ -14,6 +15,7 @@ from finances.schemas.parser_schemas import (
     ParsedStatement,
     ParsedTransaction,
     StatementData,
+    TransactionType,
 )
 
 _PERIOD_RE = re.compile(r"Periodo:\s+Del\s+(\d{1,2})\s+al\s+(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})")
@@ -67,7 +69,7 @@ def _parse_date(raw: str) -> date:
     return date(int(year), int(month), int(day))
 
 
-def _infer_type(amount: Decimal) -> str:
+def _infer_type(amount: Decimal) -> TransactionType:
     return "payment" if amount > 0 else "charge"
 
 
@@ -188,7 +190,7 @@ class MercadoPagoParser(BankParser):
             pocket_movements=self.parse_pocket_movements(transactions),
         )
 
-    def _parse_page(self, page: object) -> list[ParsedTransaction]:  # type: ignore[override]
+    def _parse_page(self, page: object) -> list[ParsedTransaction]:
         """
         Extract transactions from one page using word (x, y) coordinates.
 
@@ -198,15 +200,17 @@ class MercadoPagoParser(BankParser):
         band and column based on position, reconstructing rows even when
         descriptions wrap across multiple visual lines within the same cell.
         """
-        rects: list[dict] = getattr(page, "rects", [])
-        words: list[dict] = page.extract_words(x_tolerance=3, y_tolerance=3)  # type: ignore[union-attr]
+        rects: list[dict[str, Any]] = getattr(page, "rects", [])
+        words: list[dict[str, Any]] = page.extract_words(x_tolerance=3, y_tolerance=3)  # type: ignore[attr-defined]
         page_height: float = getattr(page, "height", 800.0)
 
         bands = self._row_bands(rects, page_height)
         bucketed = self._bucket_words(words, bands)
         return self._build_transactions(bucketed)
 
-    def _row_bands(self, rects: list[dict], page_height: float) -> list[tuple[float, float]]:
+    def _row_bands(
+        self, rects: list[dict[str, Any]], page_height: float
+    ) -> list[tuple[float, float]]:
         """
         Derive (y_top, y_bottom) bands from horizontal rect separators.
         Each thin rect marks the bottom edge of a row.
@@ -227,7 +231,7 @@ class MercadoPagoParser(BankParser):
 
     def _bucket_words(
         self,
-        words: list[dict],
+        words: list[dict[str, Any]],
         bands: list[tuple[float, float]],
     ) -> list[dict[str, str]]:
         """

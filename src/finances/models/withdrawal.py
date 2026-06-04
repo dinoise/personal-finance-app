@@ -65,8 +65,8 @@ class CashWithdrawal(Base):
         comment="Fee charged for the withdrawal. 0.00 if none.",
     )
 
-    account: Mapped["Account"] = relationship()  # type: ignore[name-defined]
-    category: Mapped["Category | None"] = relationship()  # type: ignore[name-defined]
+    account: Mapped["Account"] = relationship()
+    category: Mapped["Category | None"] = relationship()
 
 
 from finances.models.account import Account  # noqa: E402

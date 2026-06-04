@@ -20,9 +20,9 @@ engine = create_engine(
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragmas(connection: object, _: object) -> None:
     assert hasattr(connection, "execute")
-    connection.execute("PRAGMA foreign_keys = ON")  # type: ignore[union-attr]
-    connection.execute("PRAGMA journal_mode = WAL")  # type: ignore[union-attr]
-    connection.execute("PRAGMA synchronous = NORMAL")  # type: ignore[union-attr]
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = NORMAL")
 
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)

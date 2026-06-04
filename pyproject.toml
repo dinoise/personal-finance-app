@@ -61,6 +61,7 @@ version_files = [
 dev = [
     "commitizen>=4.16.3",
     "mypy>=2.1.0",
+    "pandas-stubs>=3.0.3.260530",
     "pre-commit>=4.6.0",
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
