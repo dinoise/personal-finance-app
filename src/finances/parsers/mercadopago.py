@@ -194,107 +194,86 @@ class MercadoPagoParser(BankParser):
         """
         Extract transactions from one page using word (x, y) coordinates.
 
-        openhtmltopdf renders each table row with 5 thin horizontal rects
-        (one per column) sharing the same y0 — these are the row bottom borders.
-        We derive row bands from those y0 values, then bucket each word into its
-        band and column based on position, reconstructing rows even when
-        descriptions wrap across multiple visual lines within the same cell.
+        Strategy: identify row anchors (the top-y of each date/op_id pair),
+        then assign every word to the nearest anchor within _ROW_HEIGHT.
+        This is more robust than band-based bucketing because openhtmltopdf
+        sometimes places multiple transactions in the same rect band and
+        renders op_id a few points above the corresponding date.
         """
-        rects: list[dict[str, Any]] = getattr(page, "rects", [])
         words: list[dict[str, Any]] = page.extract_words(x_tolerance=3, y_tolerance=3)  # type: ignore[attr-defined]
-        page_height: float = getattr(page, "height", 800.0)
-
-        bands = self._row_bands(rects, page_height)
-        bucketed = self._bucket_words(words, bands)
+        bucketed = self._bucket_words(words)
         return self._build_transactions(bucketed)
 
-    def _row_bands(
-        self, rects: list[dict[str, Any]], page_height: float
-    ) -> list[tuple[float, float]]:
+    def _bucket_words(self, words: list[dict[str, Any]]) -> list[dict[str, str]]:
         """
-        Derive (y_top, y_bottom) bands from horizontal rect separators.
-        Each thin rect marks the bottom edge of a row.
+        Two-pass bucketing:
+        Pass 1 — collect all date and op_id tops to build the anchor list.
+                 Each unique top (rounded to 2pt) that has either a valid date
+                 or a valid op_id becomes a row anchor.
+        Pass 2 — assign every word to the nearest anchor within _ROW_HEIGHT.
+
+        Anchors are derived independently per column so that a 3-4pt vertical
+        drift between the date cell and the op_id cell does not split a row.
         """
-        separator_ys = sorted(
-            set(
-                round(r["y0"], 1)
-                for r in rects
-                if r.get("height", 0) < 2 and r.get("width", 0) > 50
-            )
-        )
-
-        if not separator_ys:
-            return [(0.0, page_height)]
-
-        boundaries = [0.0, *separator_ys, page_height]
-        return [(boundaries[i], boundaries[i + 1]) for i in range(len(boundaries) - 1)]
-
-    def _bucket_words(
-        self,
-        words: list[dict[str, Any]],
-        bands: list[tuple[float, float]],
-    ) -> list[dict[str, str]]:
-        """
-        Assign each word to its row band and column.
-        Returns a list of row dicts: {date, description, op_id, value}.
-
-        Two-pass approach:
-        Pass 1 — date/op_id/value are bucketed strictly by band (narrow columns).
-        Pass 2 — description words are assigned to the row whose anchor is nearest
-                 vertically, within _ROW_HEIGHT. This handles the openhtmltopdf
-                 quirk where the first description line renders *above* the date
-                 anchor (different band) while subsequent lines render below it.
-        """
-        # (top, x0, text) — x0 needed to reconstruct left-to-right order per line
         RowWords = list[tuple[float, float, str]]
-        rows: list[dict[str, RowWords]] = [
-            {"date": [], "description": [], "op_id": [], "value": []} for _ in bands
-        ]
 
-        desc_words: RowWords = []
-
+        # Pass 1: collect candidate anchor tops from date and op_id columns
+        date_tops: list[float] = []
+        op_id_tops: list[float] = []
         for word in words:
             top: float = word["top"]
             x0: float = word["x0"]
             text: str = word["text"]
+            if x0 < _COL_DATE_MAX and _DATE_RE.match(text):
+                date_tops.append(top)
+            elif _COL_DESC_MAX <= x0 < _COL_ID_MAX and _OP_ID_RE.match(text):
+                op_id_tops.append(top)
 
-            idx = self._band_index(top, bands)
-            if idx is None:
+        # Merge date and op_id tops: group within 5pt, take the mean as anchor
+        raw_tops = sorted(set(date_tops + op_id_tops))
+        anchors: list[float] = []
+        for t in raw_tops:
+            if anchors and abs(t - anchors[-1]) <= 5.0:
+                # Merge into the existing anchor (running mean)
+                anchors[-1] = (anchors[-1] + t) / 2
+            else:
+                anchors.append(t)
+
+        if not anchors:
+            return []
+
+        rows: list[dict[str, RowWords]] = [
+            {"date": [], "description": [], "op_id": [], "value": []} for _ in anchors
+        ]
+
+        # Pass 2: assign every word to the nearest anchor within _ROW_HEIGHT
+        for word in words:
+            top = word["top"]
+            x0 = word["x0"]
+            text = word["text"]
+
+            best_idx: int | None = None
+            best_dist = float("inf")
+            for i, anchor in enumerate(anchors):
+                dist = abs(top - anchor)
+                if dist <= _ROW_HEIGHT and dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+
+            if best_idx is None:
                 continue
 
-            row = rows[idx]
+            row = rows[best_idx]
             if x0 < _COL_DATE_MAX:
                 row["date"].append((top, x0, text))
             elif x0 < _COL_DESC_MAX:
-                desc_words.append((top, x0, text))
+                row["description"].append((top, x0, text))
             elif x0 < _COL_ID_MAX:
                 row["op_id"].append((top, x0, text))
             elif x0 < _COL_VALUE_MAX:
                 row["value"].append((top, x0, text))
 
-        # Compute per-row anchors from pass 1 data
-        anchors: list[float | None] = []
-        for row in rows:
-            valid_tops = [t for t, _, txt in row["date"] if _DATE_RE.match(txt)]
-            valid_tops += [t for t, _, txt in row["op_id"] if _OP_ID_RE.match(txt)]
-            anchors.append(min(valid_tops) if valid_tops else None)
-
-        # Pass 2: assign each description word to the nearest anchor within _ROW_HEIGHT
-        for top, x0, text in desc_words:
-            best_idx: int | None = None
-            best_dist = float("inf")
-            for i, anchor in enumerate(anchors):
-                if anchor is None:
-                    continue
-                dist = abs(top - anchor)
-                if dist <= _ROW_HEIGHT and dist < best_dist:
-                    best_dist = dist
-                    best_idx = i
-            if best_idx is not None:
-                rows[best_idx]["description"].append((top, x0, text))
-
         def _join(items: RowWords) -> str:
-            # Sort by line (top rounded to 1pt) then left-to-right within each line
             ordered = sorted(items, key=lambda w: (round(w[0]), w[1]))
             return " ".join(txt for _, _, txt in ordered).strip()
 
@@ -307,13 +286,6 @@ class MercadoPagoParser(BankParser):
             }
             for row in rows
         ]
-
-    @staticmethod
-    def _band_index(top: float, bands: list[tuple[float, float]]) -> int | None:
-        for i, (y_top, y_bottom) in enumerate(bands):
-            if y_top <= top < y_bottom:
-                return i
-        return None
 
     def _build_transactions(self, rows: list[dict[str, str]]) -> list[ParsedTransaction]:
         transactions: list[ParsedTransaction] = []
