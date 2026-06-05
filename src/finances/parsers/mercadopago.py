@@ -238,13 +238,20 @@ class MercadoPagoParser(BankParser):
         Assign each word to its row band and column.
         Returns a list of row dicts: {date, description, op_id, value}.
 
-        Description words are allowed to span across adjacent bands because
-        long descriptions wrap visually (the cell is taller than the other
-        columns).  All other columns are strictly bucketed to their band.
+        Two-pass approach:
+        Pass 1 — date/op_id/value are bucketed strictly by band (narrow columns).
+        Pass 2 — description words are assigned to the row whose anchor is nearest
+                 vertically, within _ROW_HEIGHT. This handles the openhtmltopdf
+                 quirk where the first description line renders *above* the date
+                 anchor (different band) while subsequent lines render below it.
         """
-        rows: list[dict[str, list[tuple[float, str]]]] = [
+        # (top, x0, text) — x0 needed to reconstruct left-to-right order per line
+        RowWords = list[tuple[float, float, str]]
+        rows: list[dict[str, RowWords]] = [
             {"date": [], "description": [], "op_id": [], "value": []} for _ in bands
         ]
+
+        desc_words: RowWords = []
 
         for word in words:
             top: float = word["top"]
@@ -257,45 +264,49 @@ class MercadoPagoParser(BankParser):
 
             row = rows[idx]
             if x0 < _COL_DATE_MAX:
-                row["date"].append((top, text))
+                row["date"].append((top, x0, text))
             elif x0 < _COL_DESC_MAX:
-                row["description"].append((top, text))
+                desc_words.append((top, x0, text))
             elif x0 < _COL_ID_MAX:
-                row["op_id"].append((top, text))
+                row["op_id"].append((top, x0, text))
             elif x0 < _COL_VALUE_MAX:
-                row["value"].append((top, text))
+                row["value"].append((top, x0, text))
 
-        # For each band determine the anchor top from valid date/op_id tokens only,
-        # then filter description words to those within _ROW_HEIGHT of that anchor.
-        result: list[dict[str, str]] = []
+        # Compute per-row anchors from pass 1 data
+        anchors: list[float | None] = []
         for row in rows:
-            # Anchor: top of the first valid date token or valid op_id token
-            valid_date_tops = [t for t, txt in row["date"] if _DATE_RE.match(txt)]
-            valid_id_tops = [t for t, txt in row["op_id"] if _OP_ID_RE.match(txt)]
-            anchor_tops = valid_date_tops + valid_id_tops
-            anchor = min(anchor_tops) if anchor_tops else None
+            valid_tops = [t for t, _, txt in row["date"] if _DATE_RE.match(txt)]
+            valid_tops += [t for t, _, txt in row["op_id"] if _OP_ID_RE.match(txt)]
+            anchors.append(min(valid_tops) if valid_tops else None)
 
-            def _join(
-                items: list[tuple[float, str]],
-                strict: bool,
-                row_anchor: float | None,
-            ) -> str:
-                if not strict or row_anchor is None:
-                    return " ".join(txt for _, txt in items).strip()
-                return " ".join(
-                    txt for t, txt in items if abs(t - row_anchor) <= _ROW_HEIGHT
-                ).strip()
+        # Pass 2: assign each description word to the nearest anchor within _ROW_HEIGHT
+        for top, x0, text in desc_words:
+            best_idx: int | None = None
+            best_dist = float("inf")
+            for i, anchor in enumerate(anchors):
+                if anchor is None:
+                    continue
+                dist = abs(top - anchor)
+                if dist <= _ROW_HEIGHT and dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+            if best_idx is not None:
+                rows[best_idx]["description"].append((top, x0, text))
 
-            result.append(
-                {
-                    "date": _join(row["date"], strict=False, row_anchor=anchor),
-                    "description": _join(row["description"], strict=True, row_anchor=anchor),
-                    "op_id": _join(row["op_id"], strict=False, row_anchor=anchor),
-                    "value": _join(row["value"], strict=False, row_anchor=anchor),
-                }
-            )
+        def _join(items: RowWords) -> str:
+            # Sort by line (top rounded to 1pt) then left-to-right within each line
+            ordered = sorted(items, key=lambda w: (round(w[0]), w[1]))
+            return " ".join(txt for _, _, txt in ordered).strip()
 
-        return result
+        return [
+            {
+                "date": _join(row["date"]),
+                "description": _join(row["description"]),
+                "op_id": _join(row["op_id"]),
+                "value": _join(row["value"]),
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def _band_index(top: float, bands: list[tuple[float, float]]) -> int | None:
@@ -307,7 +318,7 @@ class MercadoPagoParser(BankParser):
     def _build_transactions(self, rows: list[dict[str, str]]) -> list[ParsedTransaction]:
         transactions: list[ParsedTransaction] = []
 
-        for i, row in enumerate(rows):
+        for row in rows:
             # Pick the first DD-MM-YYYY token — header words may share the band
             date_str = next((t for t in row["date"].split() if _DATE_RE.match(t)), "")
             # Pick the first 9+-digit token — stray single digits may follow
@@ -324,16 +335,6 @@ class MercadoPagoParser(BankParser):
                 "",
                 row["description"],
             ).strip()
-
-            # If description is empty, look ahead one band — the description
-            # words may have landed in the next band due to row height differences
-            if not description and i + 1 < len(rows):
-                next_row = rows[i + 1]
-                next_date = next((t for t in next_row["date"].split() if _DATE_RE.match(t)), "")
-                next_op = next((t for t in next_row["op_id"].split() if _OP_ID_RE.match(t)), "")
-                # Borrow description only if the next band is not its own transaction
-                if not next_date and not next_op:
-                    description = next_row["description"].strip()
 
             amount = _parse_decimal(value_str)
 
