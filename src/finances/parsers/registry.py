@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from finances.parsers.banamex_credit import BanamexCreditParser
 from finances.parsers.base import BankParser
 from finances.parsers.bbva_debit import BBVADebitParser
-from finances.parsers.mercadopago import MercadoPagoParser
+from finances.parsers.mercadopago_debit import MercadoPagoDebitParser
 from finances.parsers.nu_credit import NuCreditParser
 from finances.parsers.nu_debit import NuDebitParser
 
@@ -29,7 +29,7 @@ REGISTRY: list[BankConfig] = [
         "debit",
         "Mercado Pago",
         "ESTADO DE SALDOS",
-        MercadoPagoParser,
+        MercadoPagoDebitParser,
         needs_clabe=True,
     ),
 ]
