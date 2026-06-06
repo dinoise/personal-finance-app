@@ -6,12 +6,9 @@ import pandas as pd
 import streamlit as st
 
 from finances.schemas.import_schemas import ImportError, ImportResult, ParsedPdfData
-from finances.services.import_service import (
-    get_existing_account,
-    get_statement_transactions,
-    import_parsed,
-    parse_pdf,
-)
+from finances.services.account_service import get_existing_account
+from finances.services.import_service import import_parsed, parse_pdf
+from finances.services.transaction_service import get_statement_transactions
 
 _SESSION_KEY = "parsed_pdf"
 
