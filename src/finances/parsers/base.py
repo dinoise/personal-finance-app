@@ -5,6 +5,7 @@ from finances.schemas.parser_schemas import (
     AccountType,
     BankName,
     ParsedAccount,
+    ParsedPocketMovement,
     ParsedStatement,
     ParsedTransaction,
     StatementData,
@@ -49,3 +50,13 @@ class BankParser(ABC):
             statement=self.parse_statement(path),
             transactions=self.parse_transactions(path),
         )
+
+    def parse_pocket_movements(
+        self, transactions: list[ParsedTransaction]
+    ) -> list[ParsedPocketMovement]:
+        """Extract savings pocket movements from parsed transactions.
+
+        Returns an empty list by default. Override in debit parsers that
+        support named savings pockets (e.g. MercadoPago Apartados, Nu Cajitas).
+        """
+        return []
