@@ -1,3 +1,13 @@
+## v0.7.0 (2026-06-06)
+
+### Feat
+
+- **parsers**: implement NuDebitParser with cajitas pockets and SPEI detail extraction
+
+### Refactor
+
+- **parsers**: standardize BankParser ABC with shared public API and consistent internal structure
+
 ## v0.6.0 (2026-06-05)
 
 ### Feat
