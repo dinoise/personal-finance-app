@@ -5,7 +5,7 @@ from re import Match
 from typing import ClassVar
 
 from finances.parsers.base import BankParser
-from finances.parsers.utils import MONTHS, parse_decimal
+from finances.parsers.utils import MONTHS, parse_date_dmy_text, parse_decimal
 from finances.schemas.parser_schemas import (
     AccountType,
     BankName,
@@ -14,21 +14,6 @@ from finances.schemas.parser_schemas import (
     ParsedStatement,
     ParsedTransaction,
 )
-
-_MONTH_ABBR: dict[str, int] = {
-    "ENE": 1,
-    "FEB": 2,
-    "MAR": 3,
-    "ABR": 4,
-    "MAY": 5,
-    "JUN": 6,
-    "JUL": 7,
-    "AGO": 8,
-    "SEP": 9,
-    "OCT": 10,
-    "NOV": 11,
-    "DIC": 12,
-}
 
 
 class NuDebitParser(BankParser):
@@ -173,11 +158,6 @@ class NuDebitParser(BankParser):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _parse_date(raw: str) -> date:
-        parts = raw.split()
-        return date(int(parts[2]), _MONTH_ABBR[parts[1]], int(parts[0]))
-
     def _normalize_split_dates(self, text: str) -> str:
         # Format 1: "DD MMM\ndesc +/-$amt\nYYYY"
         text = self._SPLIT_DATE_RE.sub(
@@ -223,7 +203,7 @@ class NuDebitParser(BankParser):
 
             transactions.append(
                 ParsedTransaction(
-                    date=self._parse_date(m.group(1)),
+                    date=parse_date_dmy_text(m.group(1)),
                     description=m.group(2).strip(),
                     amount=amount,
                     transaction_type=self._infer_type(amount),

@@ -41,3 +41,9 @@ def parse_date_dmy(raw: str) -> date:
     """Parse a DD-MM-YYYY date string (standard format in Mexican bank PDFs)."""
     day, month, year = raw.split("-")
     return date(int(year), int(month), int(day))
+
+
+def parse_date_dmy_text(raw: str) -> date:
+    """Parse a 'DD MMM YYYY' date string where MMM is a Spanish month abbreviation."""
+    day, month_str, year = raw.split()
+    return date(int(year), MONTHS[month_str.lower()], int(day))
