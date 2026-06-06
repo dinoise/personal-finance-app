@@ -47,9 +47,7 @@ class MercadoPagoDebitParser(BankParser):
     _POCKET_WITHDRAWAL_RE: ClassVar = re.compile(r"^Monto retirado (.+)$", re.IGNORECASE)
     _POCKET_INTEREST_RE: ClassVar = re.compile(r"^Ganancia", re.IGNORECASE)
 
-    @staticmethod
-    def _infer_type(amount: Decimal) -> TransactionType:
-        return "payment" if amount > 0 else "charge"
+    # ── Properties ──────────────────────────────────────────────────────────
 
     @property
     def bank_name(self) -> BankName:
@@ -59,10 +57,7 @@ class MercadoPagoDebitParser(BankParser):
     def account_type(self) -> AccountType:
         return "debit"
 
-    def validate(self, path: Path) -> bool:
-        with pdfplumber.open(path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-        return "ESTADO DE SALDOS" in text
+    # ── Public API (ABC) ────────────────────────────────────────────────────
 
     def parse_account(self, path: Path) -> ParsedAccount:
         with pdfplumber.open(path) as pdf:
@@ -80,6 +75,21 @@ class MercadoPagoDebitParser(BankParser):
             for page in pdf.pages:
                 transactions.extend(self._parse_page(page))
         return transactions
+
+    def parse(self, path: Path) -> StatementData:
+        with pdfplumber.open(path) as pdf:
+            first_page_text = pdf.pages[0].extract_text() or ""
+            transactions: list[ParsedTransaction] = []
+            for page in pdf.pages:
+                transactions.extend(self._parse_page(page))
+        return StatementData(
+            account=self._account_from_text(first_page_text),
+            statement=self._statement_from_text(first_page_text, path.name),
+            transactions=transactions,
+            pocket_movements=self.parse_pocket_movements(transactions),
+        )
+
+    # ── Public extensions ───────────────────────────────────────────────────
 
     def parse_pocket_movements(
         self, transactions: list[ParsedTransaction]
@@ -124,18 +134,7 @@ class MercadoPagoDebitParser(BankParser):
 
         return movements
 
-    def parse(self, path: Path) -> StatementData:
-        with pdfplumber.open(path) as pdf:
-            first_page_text = pdf.pages[0].extract_text() or ""
-            transactions: list[ParsedTransaction] = []
-            for page in pdf.pages:
-                transactions.extend(self._parse_page(page))
-        return StatementData(
-            account=self._account_from_text(first_page_text),
-            statement=self._statement_from_text(first_page_text, path.name),
-            transactions=transactions,
-            pocket_movements=self.parse_pocket_movements(transactions),
-        )
+    # ── Private helpers ─────────────────────────────────────────────────────
 
     def _account_from_text(self, text: str) -> ParsedAccount:
         account_number: str | None = None
@@ -170,6 +169,12 @@ class MercadoPagoDebitParser(BankParser):
             opening_balance=opening_balance,
             closing_balance=closing_balance,
         )
+
+    # ── Private parsing pipeline ────────────────────────────────────────────
+
+    @staticmethod
+    def _infer_type(amount: Decimal) -> TransactionType:
+        return "payment" if amount > 0 else "charge"
 
     def _parse_page(self, page: object) -> list[ParsedTransaction]:
         """
