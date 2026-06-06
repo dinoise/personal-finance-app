@@ -6,12 +6,13 @@ from finances.parsers.bbva_debit import BBVADebitParser
 from finances.parsers.mercadopago_debit import MercadoPagoDebitParser
 from finances.parsers.nu_credit import NuCreditParser
 from finances.parsers.nu_debit import NuDebitParser
+from finances.schemas.parser_schemas import AccountType
 
 
 @dataclass(frozen=True)
 class BankConfig:
     bank_key: str
-    account_type: str
+    account_type: AccountType
     label: str
     signature: str
     parser_class: type[BankParser] = field(hash=False)
