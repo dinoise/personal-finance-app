@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from finances.schemas.parser_schemas import AccountType, BankName, StatementData
+
+if TYPE_CHECKING:
+    from finances.parsers.registry import BankConfig
 
 
 @dataclass
@@ -14,18 +20,15 @@ class ParsedPdfData:
     account_type: AccountType
     file_hash: str
     data: StatementData
+    config: BankConfig
 
     @property
     def bank_label(self) -> str:
-        from finances.parsers.registry import get_config
-
-        return get_config(self.bank, self.account_type).label
+        return self.config.label
 
     @property
     def needs_clabe(self) -> bool:
-        from finances.parsers.registry import get_config
-
-        return get_config(self.bank, self.account_type).needs_clabe
+        return self.config.needs_clabe
 
 
 @dataclass

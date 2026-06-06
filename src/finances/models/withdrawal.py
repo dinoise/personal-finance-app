@@ -1,9 +1,16 @@
+from __future__ import annotations
+
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import CheckConstraint, ForeignKey, Index, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from finances.core.database import Base
+
+if TYPE_CHECKING:
+    from finances.models.account import Account
+    from finances.models.transaction import Category
 
 # Allowed withdrawal point types
 WITHDRAWAL_TYPES = ("atm", "convenience_store", "bank_branch", "other")
@@ -65,9 +72,5 @@ class CashWithdrawal(Base):
         comment="Fee charged for the withdrawal. 0.00 if none.",
     )
 
-    account: Mapped["Account"] = relationship()  # type: ignore[name-defined]
-    category: Mapped["Category | None"] = relationship()  # type: ignore[name-defined]
-
-
-from finances.models.account import Account  # noqa: E402
-from finances.models.transaction import Category  # noqa: E402
+    account: Mapped[Account] = relationship()
+    category: Mapped[Category | None] = relationship()

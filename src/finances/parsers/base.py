@@ -5,6 +5,7 @@ from finances.schemas.parser_schemas import (
     AccountType,
     BankName,
     ParsedAccount,
+    ParsedPocketMovement,
     ParsedStatement,
     ParsedTransaction,
     StatementData,
@@ -20,9 +21,15 @@ class BankParser(ABC):
     @abstractmethod
     def account_type(self) -> AccountType: ...
 
-    @abstractmethod
-    def validate(self, path: Path) -> bool:
-        """Return True if this PDF belongs to this parser before processing."""
+    def validate(self, text: str) -> bool:
+        """Return True if this PDF's first-page text passes structural checks.
+
+        The default implementation verifies the registry signature — already
+        checked by detect_config(), so it always returns True here.
+        Override in a subclass to add deeper checks (required sections,
+        expected page count, etc.).
+        """
+        return True
 
     @abstractmethod
     def parse_account(self, path: Path) -> ParsedAccount:
@@ -43,3 +50,13 @@ class BankParser(ABC):
             statement=self.parse_statement(path),
             transactions=self.parse_transactions(path),
         )
+
+    def parse_pocket_movements(
+        self, transactions: list[ParsedTransaction]
+    ) -> list[ParsedPocketMovement]:
+        """Extract savings pocket movements from parsed transactions.
+
+        Returns an empty list by default. Override in debit parsers that
+        support named savings pockets (e.g. MercadoPago Apartados, Nu Cajitas).
+        """
+        return []

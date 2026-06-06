@@ -13,13 +13,14 @@ import hashlib
 import shutil
 from pathlib import Path
 
+import pdfplumber
 from sqlalchemy.exc import IntegrityError
 
 from finances.core.config import settings
 from finances.core.database import SessionLocal
-from finances.parsers.detector import detect_bank_and_type
-from finances.parsers.factory import get_parser
-from finances.parsers.registry import get_config
+from finances.models.account import Account
+from finances.models.transaction import Transaction
+from finances.parsers.registry import detect_config
 from finances.repositories.account_repository import AccountRepository
 from finances.repositories.savings_pocket_repository import SavingsPocketRepository
 from finances.repositories.transaction_repository import TransactionRepository
@@ -34,22 +35,22 @@ from finances.schemas.parser_schemas import ParsedPocketMovement, ParsedTransact
 def parse_pdf(path: Path) -> ParsedPdfData | ImportError:
     """Open and fully parse a PDF. Returns a ParsedPdfData to cache in session state."""
     try:
-        bank, account_type = detect_bank_and_type(path)
+        with pdfplumber.open(path) as pdf:
+            first_page_text = pdf.pages[0].extract_text() or ""
+        config = detect_config(first_page_text)
     except ValueError as e:
         return ImportError(reason=str(e))
 
-    parser = get_parser(bank, account_type)
-    if not parser.validate(path):
-        return ImportError(reason=f"PDF failed validation for {bank}/{account_type}.")
-
+    parser = config.parser_class()
     file_hash = hashlib.md5(path.read_bytes()).hexdigest()
     data = parser.parse(path)
 
     return ParsedPdfData(
-        bank=bank,
-        account_type=account_type,
+        bank=config.bank_key,
+        account_type=config.account_type,
         file_hash=file_hash,
         data=data,
+        config=config,
     )
 
 
@@ -106,7 +107,7 @@ def _resolve_account(
     alias: str,
     clabe: str | None,
     account_number: str | None,
-):
+) -> Account:
     if clabe:
         account = repo.get_by_clabe(clabe)
         if account:
@@ -131,7 +132,7 @@ def _insert_transactions(
     account_id: int,
     statement_id: int,
     parsed: list[ParsedTransaction],
-) -> list:
+) -> list[Transaction]:
     result = []
     for p in parsed:
         existing = repo.exists(statement_id, p.bank_reference, p.amount)
@@ -156,7 +157,7 @@ def _insert_transactions(
 def _insert_pocket_movements(
     repo: SavingsPocketRepository,
     account_id: int,
-    transactions: list,
+    transactions: list[Transaction],
     movements: list[ParsedPocketMovement],
 ) -> int:
     count = 0
@@ -249,7 +250,7 @@ def import_parsed(
         return ImportResult(
             statement_id=statement.id,
             account_alias=account.alias,
-            bank_label=get_config(bank, account_type).label,
+            bank_label=parsed.config.label,
             transactions_inserted=len(txns),
             pocket_movements_inserted=pocket_count,
             pdf_stored_path=pdf_path,

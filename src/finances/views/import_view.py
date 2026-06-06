@@ -86,24 +86,24 @@ def render() -> None:
             source_path = Path(tmp.name)
 
         with st.spinner("Importing…"):
-            result = import_parsed(parsed, source_path, clabe_override=clabe)
+            import_result = import_parsed(parsed, source_path, clabe_override=clabe)
         source_path.unlink(missing_ok=True)
 
-        if isinstance(result, ImportError):
-            st.error(f"Import failed: {result.reason}")
+        if isinstance(import_result, ImportError):
+            st.error(f"Import failed: {import_result.reason}")
             return
 
-        assert isinstance(result, ImportResult)
+        assert isinstance(import_result, ImportResult)
         st.success("Import complete!")
         st.session_state.pop(_SESSION_KEY, None)
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Transactions", result.transactions_inserted)
-        col2.metric("Pocket movements", result.pocket_movements_inserted)
-        col3.metric("PDF archived", result.pdf_stored_path.name)
-        st.caption(f"Stored at: `{result.pdf_stored_path}`")
+        col1.metric("Transactions", import_result.transactions_inserted)
+        col2.metric("Pocket movements", import_result.pocket_movements_inserted)
+        col3.metric("PDF archived", import_result.pdf_stored_path.name)
+        st.caption(f"Stored at: `{import_result.pdf_stored_path}`")
 
-        _show_transactions(result.statement_id)
+        _show_transactions(import_result.statement_id)
 
 
 def _show_transactions(statement_id: int) -> None:

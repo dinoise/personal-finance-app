@@ -19,7 +19,7 @@ class NuDebitParser(BankParser):
     def account_type(self) -> AccountType:
         return "debit"
 
-    def validate(self, path: Path) -> bool:
+    def validate(self, text: str) -> bool:
         raise NotImplementedError
 
     def parse_account(self, path: Path) -> ParsedAccount:

@@ -1,3 +1,17 @@
+## v0.5.1 (2026-06-05)
+
+### Fix
+
+- **parsers**: replace band-based bucketing with anchor-per-row to recover missing transactions
+- **parsers**: recover description lines rendered above row anchor in MP parser
+- **types**: resolve all mypy errors across models, parsers, services and views
+- **env**: register SavingsPocket and SavingsPocketMovement for autogenerate
+- **account-repository**: replace object types with proper date and Decimal annotations
+
+### Refactor
+
+- **models**: replace circular imports with TYPE_CHECKING pattern
+
 ## v0.5.0 (2026-06-04)
 
 ### Feat
