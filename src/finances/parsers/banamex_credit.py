@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from finances.parsers.base import BankParser
 from finances.schemas.parser_schemas import (
     AccountType,
@@ -22,11 +20,11 @@ class BanamexCreditParser(BankParser):
     def validate(self, text: str) -> bool:
         raise NotImplementedError
 
-    def parse_account(self, path: Path) -> ParsedAccount:
+    def _account_from_text(self, text: str) -> ParsedAccount:
         raise NotImplementedError
 
-    def parse_statement(self, path: Path) -> ParsedStatement:
+    def _statement_from_text(self, text: str, filename: str) -> ParsedStatement:
         raise NotImplementedError
 
-    def parse_transactions(self, path: Path) -> list[ParsedTransaction]:
+    def _parse_page(self, page: object) -> list[ParsedTransaction]:
         raise NotImplementedError

@@ -1,10 +1,8 @@
 import re
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
+from re import Match
 from typing import ClassVar
-
-import pdfplumber
 
 from finances.parsers.base import BankParser
 from finances.parsers.utils import MONTHS, parse_decimal
@@ -15,8 +13,6 @@ from finances.schemas.parser_schemas import (
     ParsedPocketMovement,
     ParsedStatement,
     ParsedTransaction,
-    StatementData,
-    TransactionType,
 )
 
 _MONTH_ABBR: dict[str, int] = {
@@ -36,7 +32,9 @@ _MONTH_ABBR: dict[str, int] = {
 
 
 class NuDebitParser(BankParser):
-    # Header patterns (page 1)
+    # ── Class-level patterns ──────────────────────────────────────────────────
+
+    # Header (page 1)
     _ACCOUNT_RE: ClassVar = re.compile(r"Cuenta Nu:\s*(\d+)")
     _CLABE_RE: ClassVar = re.compile(r"CLABE:\s*(\d{18})")
     _PERIOD_RE: ClassVar = re.compile(
@@ -48,7 +46,7 @@ class NuDebitParser(BankParser):
         re.DOTALL,
     )
 
-    # Marks the start of the cajitas mirror section — stop parsing here
+    # Section boundary — pages from here on are a mirror with inverted signs
     _CAJITAS_SECTION: ClassVar = "Detalle de movimientos de tus cajitas"
 
     # Transaction line: "DD MMM YYYY  <description>  +/-$amount"
@@ -57,31 +55,31 @@ class NuDebitParser(BankParser):
         re.MULTILINE,
     )
 
-    # Split-date format: "DD MMM\n<description> +/-$amount\nYYYY"
+    # Split-date: "DD MMM\n<description> +/-$amount\nYYYY"
     # pdfplumber breaks the date across lines on dense pages
     _SPLIT_DATE_RE: ClassVar = re.compile(
         r"^(\d{2}\s+[A-ZÁÉÍÓÚÜÑ]{3})\n(.+?)\s+([+-]\$[\d,]+\.\d{2})\n(\d{4})$",
         re.MULTILINE,
     )
 
-    # Inverted format: description wraps above the date line, concept below
+    # Inverted: description wraps above the date line, concept wraps below
     # "desc_part1\nDD MMM YYYY +/-$amount\nconcept_part2"
     _INVERTED_DATE_RE: ClassVar = re.compile(
         r"^([^\n]+)\n(\d{2}\s+[A-ZÁÉÍÓÚÜÑ]{3}\s+\d{4})\s+([+-]\$[\d,]+\.\d{2})\n([^\n]+)$",
         re.MULTILINE,
     )
 
-    # Cajitas (savings pockets) movement patterns
+    # Cajitas movement descriptions
     _POCKET_DEPOSIT_RE: ClassVar = re.compile(r"^Depósito en Cajita:\s+(.+)$")
     _POCKET_WITHDRAWAL_RE: ClassVar = re.compile(r"^Retiro de Cajita:\s+(.+)$")
 
-    # SPEI detail patterns (text block after each transaction line)
+    # SPEI detail block (text after each transaction line)
     # Matches 16-digit card numbers (debit-card/credit-card) or 18-digit CLABEs
     _DETAIL_CLABE_RE: ClassVar = re.compile(r"(\d{16,18})\s+(?:clabe|debit-card|credit-card)")
     _TRACKING_RE: ClassVar = re.compile(r"Clave de rastreo\s+(\S+?)(?:,|\s)")
     _REFERENCE_RE: ClassVar = re.compile(r"Clave de referencia\s+(\S+)")
 
-    # ── Properties ──────────────────────────────────────────────────────────
+    # ── Identity ──────────────────────────────────────────────────────────────
 
     @property
     def bank_name(self) -> BankName:
@@ -91,45 +89,11 @@ class NuDebitParser(BankParser):
     def account_type(self) -> AccountType:
         return "debit"
 
-    # ── Public API (ABC) ────────────────────────────────────────────────────
+    # ── Hooks ─────────────────────────────────────────────────────────────────
 
-    def parse_account(self, path: Path) -> ParsedAccount:
-        with pdfplumber.open(path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-        return self._account_from_text(text)
-
-    def parse_statement(self, path: Path) -> ParsedStatement:
-        with pdfplumber.open(path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-        return self._statement_from_text(text, path.name)
-
-    def parse_transactions(self, path: Path) -> list[ParsedTransaction]:
-        transactions: list[ParsedTransaction] = []
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                if self._CAJITAS_SECTION in text:
-                    break
-                transactions.extend(self._parse_page(text))
-        return transactions
-
-    def parse(self, path: Path) -> StatementData:
-        with pdfplumber.open(path) as pdf:
-            first_page_text = pdf.pages[0].extract_text() or ""
-            transactions: list[ParsedTransaction] = []
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                if self._CAJITAS_SECTION in text:
-                    break
-                transactions.extend(self._parse_page(text))
-        return StatementData(
-            account=self._account_from_text(first_page_text),
-            statement=self._statement_from_text(first_page_text, path.name),
-            transactions=transactions,
-            pocket_movements=self.parse_pocket_movements(transactions),
-        )
-
-    # ── Public extensions ───────────────────────────────────────────────────
+    def _should_stop(self, page: object) -> bool:
+        text = page.extract_text() or ""  # type: ignore[attr-defined]
+        return self._CAJITAS_SECTION in text
 
     def parse_pocket_movements(
         self, transactions: list[ParsedTransaction]
@@ -161,7 +125,7 @@ class NuDebitParser(BankParser):
 
         return movements
 
-    # ── Private helpers ─────────────────────────────────────────────────────
+    # ── Abstract implementation ───────────────────────────────────────────────
 
     def _account_from_text(self, text: str) -> ParsedAccount:
         clabe: str | None = None
@@ -202,63 +166,60 @@ class NuDebitParser(BankParser):
             closing_balance=closing_balance,
         )
 
-    # ── Private parsing pipeline ────────────────────────────────────────────
+    def _parse_page(self, page: object) -> list[ParsedTransaction]:
+        text = self._normalize_split_dates(page.extract_text() or "")  # type: ignore[attr-defined]
+        matches = list(self._TXN_RE.finditer(text))
+        return self._build_transactions(text, matches)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     @staticmethod
     def _parse_date(raw: str) -> date:
         parts = raw.split()
         return date(int(parts[2]), _MONTH_ABBR[parts[1]], int(parts[0]))
 
-    @staticmethod
-    def _infer_type(amount: Decimal) -> TransactionType:
-        return "payment" if amount > 0 else "charge"
-
     def _normalize_split_dates(self, text: str) -> str:
-        """Normalize non-standard date/description layouts to 'DD MMM YYYY desc +/-$amt'."""
         # Format 1: "DD MMM\ndesc +/-$amt\nYYYY"
         text = self._SPLIT_DATE_RE.sub(
             lambda m: f"{m.group(1)} {m.group(4)} {m.group(2)} {m.group(3)}",
             text,
         )
         # Format 2: "desc_part1\nDD MMM YYYY +/-$amt\nconcept_part2"
-        # Join desc_part1 and concept_part2 as full description
         text = self._INVERTED_DATE_RE.sub(
             lambda m: f"{m.group(2)} {m.group(1)} {m.group(4)} {m.group(3)}",
             text,
         )
         return text
 
-    def _parse_page(self, text: str) -> list[ParsedTransaction]:
-        text = self._normalize_split_dates(text)
-        matches = list(self._TXN_RE.finditer(text))
-        if not matches:
-            return []
+    def _extract_spei_detail(self, detail: str) -> tuple[str | None, str | None, str | None]:
+        counterpart_clabe: str | None = None
+        spei_tracking_key: str | None = None
+        spei_reference: str | None = None
 
+        m = self._DETAIL_CLABE_RE.search(detail)
+        if m:
+            counterpart_clabe = m.group(1)
+
+        m = self._TRACKING_RE.search(detail)
+        if m:
+            spei_tracking_key = m.group(1).rstrip(",")
+
+        m = self._REFERENCE_RE.search(detail)
+        if m:
+            spei_reference = m.group(1)
+
+        return counterpart_clabe, spei_tracking_key, spei_reference
+
+    def _build_transactions(self, text: str, matches: list[Match[str]]) -> list[ParsedTransaction]:
         transactions: list[ParsedTransaction] = []
         for i, m in enumerate(matches):
-            amount_str = m.group(3).replace("$", "").replace("+", "")
-            amount = parse_decimal(amount_str)
+            amount = parse_decimal(m.group(3).replace("$", "").replace("+", ""))
 
-            # Text between this match and the next is the SPEI detail block
             detail_start = m.end()
             detail_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            detail = text[detail_start:detail_end]
-
-            counterpart_clabe: str | None = None
-            spei_tracking_key: str | None = None
-            spei_reference: str | None = None
-
-            cm = self._DETAIL_CLABE_RE.search(detail)
-            if cm:
-                counterpart_clabe = cm.group(1)
-
-            tm = self._TRACKING_RE.search(detail)
-            if tm:
-                spei_tracking_key = tm.group(1).rstrip(",")
-
-            rm = self._REFERENCE_RE.search(detail)
-            if rm:
-                spei_reference = rm.group(1)
+            counterpart_clabe, spei_tracking_key, spei_reference = self._extract_spei_detail(
+                text[detail_start:detail_end]
+            )
 
             transactions.append(
                 ParsedTransaction(
@@ -271,5 +232,4 @@ class NuDebitParser(BankParser):
                     counterpart_clabe=counterpart_clabe,
                 )
             )
-
         return transactions
