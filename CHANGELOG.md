@@ -1,3 +1,16 @@
+## v0.6.0 (2026-06-05)
+
+### Feat
+
+- **parsers**: add parse_pocket_movements to BankParser ABC with empty default
+
+### Refactor
+
+- **parsers**: make validate() a no-op default receiving text, remove redundant call from import_service
+- **parsers**: eliminate detector/factory wrappers, use detect_config directly in import_service
+- **parsers**: extract shared helpers MONTHS, parse_decimal, parse_date_dmy to utils.py
+- **parsers**: rename MercadoPagoParser to MercadoPagoDebitParser and optimize parse() to open PDF once
+
 ## v0.5.1 (2026-06-05)
 
 ### Fix
