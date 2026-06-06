@@ -20,9 +20,15 @@ class BankParser(ABC):
     @abstractmethod
     def account_type(self) -> AccountType: ...
 
-    @abstractmethod
-    def validate(self, path: Path) -> bool:
-        """Return True if this PDF belongs to this parser before processing."""
+    def validate(self, text: str) -> bool:
+        """Return True if this PDF's first-page text passes structural checks.
+
+        The default implementation verifies the registry signature — already
+        checked by detect_config(), so it always returns True here.
+        Override in a subclass to add deeper checks (required sections,
+        expected page count, etc.).
+        """
+        return True
 
     @abstractmethod
     def parse_account(self, path: Path) -> ParsedAccount:

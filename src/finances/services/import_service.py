@@ -42,10 +42,6 @@ def parse_pdf(path: Path) -> ParsedPdfData | ImportError:
         return ImportError(reason=str(e))
 
     parser = config.parser_class()
-    if not parser.validate(path):
-        key = f"{config.bank_key}/{config.account_type}"
-        return ImportError(reason=f"PDF failed validation for {key}.")
-
     file_hash = hashlib.md5(path.read_bytes()).hexdigest()
     data = parser.parse(path)
 
