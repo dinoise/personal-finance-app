@@ -134,8 +134,17 @@ def _insert_transactions(
     parsed: list[ParsedTransaction],
 ) -> list[Transaction]:
     result = []
+    # position tracks how many identical no-reference rows we've seen so far,
+    # keyed by (date, description, amount) — used to distinguish true duplicates
+    # from legitimate repeated transactions (e.g. two $200 cajita withdrawals same day)
+    seen: dict[tuple[object, ...], int] = {}
     for p in parsed:
-        existing = repo.exists(statement_id, p.bank_reference, p.amount)
+        key = (p.date, p.description, p.amount)
+        position = seen.get(key, 0)
+        seen[key] = position + 1
+        existing = repo.exists(
+            statement_id, p.bank_reference, p.amount, p.date, p.description, position
+        )
         if existing:
             result.append(existing)
             continue

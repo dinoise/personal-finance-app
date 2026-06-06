@@ -11,17 +11,47 @@ class TransactionRepository:
         self._db = db
 
     def exists(
-        self, statement_id: int, bank_reference: str | None, amount: Decimal
+        self,
+        statement_id: int,
+        bank_reference: str | None,
+        amount: Decimal,
+        txn_date: date,
+        description: str,
+        position: int,
     ) -> Transaction | None:
-        return (
+        if bank_reference is not None:
+            # SPEI/card transactions: bank_reference is unique within a statement
+            return (
+                self._db.query(Transaction)
+                .filter_by(statement_id=statement_id, bank_reference=bank_reference)
+                .first()
+            )
+        # Transactions without a reference: count how many identical rows already
+        # exist. If already-stored count >= position+1, this slot is filled.
+        already = (
             self._db.query(Transaction)
             .filter_by(
                 statement_id=statement_id,
-                bank_reference=bank_reference,
+                bank_reference=None,
                 amount=amount,
+                date=txn_date,
+                description=description,
             )
-            .first()
+            .count()
         )
+        if already > position:
+            return (
+                self._db.query(Transaction)
+                .filter_by(
+                    statement_id=statement_id,
+                    bank_reference=None,
+                    amount=amount,
+                    date=txn_date,
+                    description=description,
+                )
+                .first()
+            )
+        return None
 
     def create(
         self,
