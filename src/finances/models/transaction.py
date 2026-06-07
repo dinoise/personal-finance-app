@@ -142,6 +142,17 @@ class Transaction(Base):
     bank_reference: Mapped[str | None] = mapped_column(
         String(100), comment="Bank's own unique identifier for this movement."
     )
+    spei_tracking_key: Mapped[str | None] = mapped_column(
+        String(30),
+        comment=(
+            "BANXICO SPEI tracking key extracted from the PDF. "
+            "Used by TransferService.detect_transfers() to link paired movements."
+        ),
+    )
+    spei_reference: Mapped[str | None] = mapped_column(
+        String(10),
+        comment="Short numeric reference from the SPEI detail line.",
+    )
     is_internal_transfer: Mapped[bool] = mapped_column(
         default=False,
         comment=(
