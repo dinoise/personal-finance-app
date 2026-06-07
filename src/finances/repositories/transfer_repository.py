@@ -1,7 +1,6 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import case
 from sqlalchemy.orm import Session, joinedload
 
 from finances.models.transfer import Transfer
@@ -44,44 +43,10 @@ class TransferRepository:
         self._db.flush()
         return transfer
 
-    def get_by_spei_key(self, spei_tracking_key: str) -> Transfer | None:
-        return self._db.query(Transfer).filter_by(spei_tracking_key=spei_tracking_key).first()
-
-    def get_by_spei_key_match(self, bank_reference: str) -> Transfer | None:
-        """Find a Transfer whose spei_tracking_key relates to bank_reference.
-
-        Tries three levels of specificity in a single query, ordered so the
-        closest match wins:
-          1. exact match          (spei_tracking_key == bank_reference)
-          2. suffix match         (spei_tracking_key ends with bank_reference)
-          3. contains match       (bank_reference is anywhere in spei_tracking_key)
-        """
-        specificity = case(
-            (Transfer.spei_tracking_key == bank_reference, 1),
-            (Transfer.spei_tracking_key.endswith(bank_reference), 2),
-            (Transfer.spei_tracking_key.contains(bank_reference), 3),
-        )
-        return (
-            self._db.query(Transfer)
-            .filter(
-                Transfer.spei_tracking_key.isnot(None),
-                Transfer.spei_tracking_key.contains(bank_reference),
-            )
-            .order_by(specificity)
-            .first()
-        )
-
-    def exists_for_source(self, transaction_id: int) -> bool:
-        return (
-            self._db.query(Transfer).filter_by(source_transaction_id=transaction_id).first()
-            is not None
-        )
-
-    def exists_for_destination(self, transaction_id: int) -> bool:
-        return (
-            self._db.query(Transfer).filter_by(destination_transaction_id=transaction_id).first()
-            is not None
-        )
+    def get_indexed_by_spei_key(self) -> dict[str, Transfer]:
+        """Return all transfers that have a spei_tracking_key, indexed by it."""
+        rows = self._db.query(Transfer).filter(Transfer.spei_tracking_key.isnot(None)).all()
+        return {t.spei_tracking_key: t for t in rows if t.spei_tracking_key is not None}
 
     def get_all(self) -> list[Transfer]:
         return (

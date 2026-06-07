@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from typing import ClassVar
 
 from finances.core.database import SessionLocal
 from finances.models.transaction import Transaction
@@ -11,6 +13,8 @@ from finances.repositories.transfer_repository import TransferRepository
 
 
 class TransferService:
+    _TRAILING_DIGITS: ClassVar[re.Pattern[str]] = re.compile(r"\d+$")
+
     def __init__(self) -> None:
         self._db = SessionLocal()
         self._txn_repo = TransactionRepository(self._db)
@@ -29,51 +33,72 @@ class TransferService:
     def detect_transfers(self) -> int:
         """Link transactions into Transfer records.
 
-        Pass 1: transactions with spei_tracking_key → create or complete a Transfer.
-        Pass 2: transactions without spei_tracking_key but with bank_reference →
-                look for an existing Transfer whose spei_tracking_key relates to
-                that bank_reference (exact → suffix → contains).
+        Reads exactly two queries up front, then does all matching in memory:
+          - Query 1: all transfers with spei_tracking_key → dict[key, Transfer]
+          - Query 2: all transactions with spei_tracking_key OR bank_reference
+
+        For each transaction:
+          - Has spei_tracking_key → O(1) dict lookup (pass 1)
+          - Has only bank_reference → scored match against dict keys (pass 2)
 
         Returns the number of Transfer records created or updated.
         """
         known_clabes = self._account_repo.get_all_clabes()
+        transfers_by_key = self._transfer_repo.get_indexed_by_spei_key()
+        suffix_index = self._build_suffix_index(transfers_by_key)
+        candidates = self._txn_repo.get_spei_candidates()
 
         touched = 0
-        touched += self._pass_spei_key(known_clabes)
-        touched += self._pass_bank_reference(known_clabes)
+        for txn in candidates:
+            if txn.spei_tracking_key is not None:
+                touched += self._handle_spei_key(txn, transfers_by_key, suffix_index, known_clabes)
+            elif txn.bank_reference is not None:
+                touched += self._handle_bank_reference(txn, suffix_index)
+
         self._db.commit()
         return touched
 
     # ------------------------------------------------------------------
-    # Internal passes
+    # Per-transaction handlers
     # ------------------------------------------------------------------
 
-    def _pass_spei_key(self, known_clabes: set[str]) -> int:
-        touched = 0
-        for txn in self._txn_repo.get_with_spei_key():
-            assert txn.spei_tracking_key is not None
-            existing = self._transfer_repo.get_by_spei_key(txn.spei_tracking_key)
-            if existing is not None:
-                touched += self._complete_transfer(existing, txn)
-            else:
-                self._create_transfer(txn, txn.spei_tracking_key, known_clabes)
-                touched += 1
-        return touched
+    def _handle_spei_key(
+        self,
+        txn: Transaction,
+        transfers_by_key: dict[str, Transfer],
+        suffix_index: dict[str, Transfer],
+        known_clabes: set[str],
+    ) -> int:
+        assert txn.spei_tracking_key is not None
+        existing = transfers_by_key.get(txn.spei_tracking_key)
+        if existing is not None:
+            return self._complete_transfer(existing, txn)
 
-    def _pass_bank_reference(self, known_clabes: set[str]) -> int:
-        touched = 0
-        for txn in self._txn_repo.get_without_spei_key_with_bank_reference():
-            assert txn.bank_reference is not None
+        transfer = self._create_transfer(txn, txn.spei_tracking_key, known_clabes)
+        transfers_by_key[txn.spei_tracking_key] = transfer
+        m = self._TRAILING_DIGITS.search(txn.spei_tracking_key)
+        if m:
+            suffix_index[m.group()] = transfer
+        return 1
 
-            if txn.amount < 0 and self._transfer_repo.exists_for_source(txn.id):
-                continue
-            if txn.amount >= 0 and self._transfer_repo.exists_for_destination(txn.id):
-                continue
+    def _handle_bank_reference(
+        self,
+        txn: Transaction,
+        suffix_index: dict[str, Transfer],
+    ) -> int:
+        assert txn.bank_reference is not None
 
-            match = self._transfer_repo.get_by_spei_key_match(txn.bank_reference)
-            if match is not None:
-                touched += self._complete_transfer(match, txn)
-        return touched
+        match = suffix_index.get(txn.bank_reference)
+        if match is None:
+            return 0
+
+        is_outgoing = txn.amount < Decimal("0")
+        if is_outgoing and match.source_transaction_id is not None:
+            return 0
+        if not is_outgoing and match.destination_transaction_id is not None:
+            return 0
+
+        return self._complete_transfer(match, txn)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -84,12 +109,12 @@ class TransferService:
         txn: Transaction,
         spei_tracking_key: str,
         known_clabes: set[str],
-    ) -> None:
+    ) -> Transfer:
         is_outgoing = txn.amount < Decimal("0")
         counterpart_id, counterpart_type = self._resolve_counterpart(txn, known_clabes)
         transfer_type = self._transfer_type(counterpart_id, known_clabes)
 
-        self._transfer_repo.create(
+        return self._transfer_repo.create(
             amount=abs(txn.amount),
             currency=txn.currency,
             txn_date=txn.date,
@@ -123,6 +148,23 @@ class TransferService:
         if counterpart_id is not None and counterpart_id in known_clabes:
             return "internal"
         return "outgoing"
+
+    def _build_suffix_index(self, transfers_by_key: dict[str, Transfer]) -> dict[str, Transfer]:
+        """Build a numeric-suffix index: trailing digits of each spei_tracking_key → Transfer.
+
+        "CPO147653673997"          → "147653673997"
+        "MBAN01002602160076127075" → "01002602160076127075"
+        "NU39KT5HHAG58GLQ2T6PF3JQRLT5" → no trailing digits, skipped
+
+        O(K) build, O(1) lookup. bank_reference is always the trailing numeric part
+        of the spei_tracking_key regardless of bank prefix.
+        """
+        index: dict[str, Transfer] = {}
+        for key, transfer in transfers_by_key.items():
+            m = self._TRAILING_DIGITS.search(key)
+            if m:
+                index[m.group()] = transfer
+        return index
 
 
 # ---------------------------------------------------------------------------

@@ -92,15 +92,13 @@ class TransactionRepository:
             .all()
         )
 
-    def get_with_spei_key(self) -> list[Transaction]:
-        return self._db.query(Transaction).filter(Transaction.spei_tracking_key.isnot(None)).all()
-
-    def get_without_spei_key_with_bank_reference(self) -> list[Transaction]:
+    def get_spei_candidates(self) -> list[Transaction]:
+        """Return all transactions that have a spei_tracking_key or a bank_reference."""
         return (
             self._db.query(Transaction)
             .filter(
-                Transaction.spei_tracking_key.is_(None),
-                Transaction.bank_reference.isnot(None),
+                (Transaction.spei_tracking_key.isnot(None))
+                | (Transaction.bank_reference.isnot(None))
             )
             .all()
         )
