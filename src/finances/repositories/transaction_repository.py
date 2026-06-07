@@ -64,6 +64,8 @@ class TransactionRepository:
         currency: str,
         transaction_type: str,
         bank_reference: str | None = None,
+        spei_tracking_key: str | None = None,
+        spei_reference: str | None = None,
     ) -> Transaction:
         txn = Transaction(
             account_id=account_id,
@@ -75,6 +77,8 @@ class TransactionRepository:
             currency=currency,
             transaction_type=transaction_type,
             bank_reference=bank_reference,
+            spei_tracking_key=spei_tracking_key,
+            spei_reference=spei_reference,
         )
         self._db.add(txn)
         self._db.flush()
@@ -85,6 +89,19 @@ class TransactionRepository:
             self._db.query(Transaction)
             .filter_by(statement_id=statement_id)
             .order_by(Transaction.date)
+            .all()
+        )
+
+    def get_with_spei_key(self) -> list[Transaction]:
+        return self._db.query(Transaction).filter(Transaction.spei_tracking_key.isnot(None)).all()
+
+    def get_without_spei_key_with_bank_reference(self) -> list[Transaction]:
+        return (
+            self._db.query(Transaction)
+            .filter(
+                Transaction.spei_tracking_key.is_(None),
+                Transaction.bank_reference.isnot(None),
+            )
             .all()
         )
 
