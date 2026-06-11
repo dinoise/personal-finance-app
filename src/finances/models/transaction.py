@@ -142,6 +142,14 @@ class Transaction(Base):
     bank_reference: Mapped[str | None] = mapped_column(
         String(100), comment="Bank's own unique identifier for this movement."
     )
+    counterpart_identifier: Mapped[str | None] = mapped_column(
+        String(20),
+        comment="CLABE, card number, or account number of the counterpart.",
+    )
+    counterpart_identifier_type: Mapped[str | None] = mapped_column(
+        String(20),
+        comment="Type of counterpart_identifier: clabe, card, account_number, unknown.",
+    )
     spei_tracking_key: Mapped[str | None] = mapped_column(
         String(30),
         comment=(

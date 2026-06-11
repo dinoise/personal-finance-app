@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from finances.models.transaction import Transaction
 
 _TRANSFER_TYPES = "internal, outgoing, incoming"
-_IDENTIFIER_TYPES = "clabe, card, account_number, unknown"
 
 
 class Transfer(Base):
@@ -23,10 +22,6 @@ class Transfer(Base):
         CheckConstraint(
             "transfer_type IN ('internal', 'outgoing', 'incoming')",
             name="ck_transfer_type",
-        ),
-        CheckConstraint(
-            "counterpart_identifier_type IN ('clabe', 'card', 'account_number', 'unknown')",
-            name="ck_transfer_identifier_type",
         ),
         Index("ix_transfer_source_transaction", "source_transaction_id"),
         Index("ix_transfer_destination_transaction", "destination_transaction_id"),
@@ -38,8 +33,7 @@ class Transfer(Base):
                 "source_transaction_id = outgoing side, "
                 "destination_transaction_id = incoming side. "
                 "Either side can be NULL if only one PDF has been imported. "
-                f"transfer_type valid values: {_TRANSFER_TYPES}. "
-                f"counterpart_identifier_type valid values: {_IDENTIFIER_TYPES}."
+                f"transfer_type valid values: {_TRANSFER_TYPES}."
             )
         },
     )
@@ -85,15 +79,6 @@ class Transfer(Base):
         ForeignKey("accounts.id", name="fk_transfer_to_account"),
         comment="Receiving account if it belongs to the user. NULL if external.",
     )
-    counterpart_identifier: Mapped[str | None] = mapped_column(
-        String(20),
-        comment="CLABE, card number, or account number of the external counterpart.",
-    )
-    counterpart_identifier_type: Mapped[str | None] = mapped_column(
-        String(20),
-        comment=f"Type of counterpart_identifier. Valid values: {_IDENTIFIER_TYPES}.",
-    )
-
     source_transaction: Mapped[Transaction | None] = relationship(
         foreign_keys=[source_transaction_id]
     )
