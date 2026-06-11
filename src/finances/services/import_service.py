@@ -209,6 +209,8 @@ class ImportService:
                 bank_reference=p.bank_reference,
                 spei_tracking_key=p.spei_tracking_key,
                 spei_reference=p.spei_reference,
+                counterpart_identifier=p.counterpart_identifier,
+                counterpart_identifier_type=p.counterpart_identifier_type,
             )
             result.append(txn)
         return result

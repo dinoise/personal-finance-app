@@ -22,8 +22,6 @@ class TransferRepository:
         spei_reference: str | None = None,
         from_account_id: int | None = None,
         to_account_id: int | None = None,
-        counterpart_identifier: str | None = None,
-        counterpart_identifier_type: str | None = None,
     ) -> Transfer:
         transfer = Transfer(
             source_transaction_id=source_transaction_id,
@@ -36,8 +34,6 @@ class TransferRepository:
             transfer_type=transfer_type,
             from_account_id=from_account_id,
             to_account_id=to_account_id,
-            counterpart_identifier=counterpart_identifier,
-            counterpart_identifier_type=counterpart_identifier_type,
         )
         self._db.add(transfer)
         self._db.flush()

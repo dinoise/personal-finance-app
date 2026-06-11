@@ -52,7 +52,8 @@ class ParsedTransaction(BaseModel):
     bank_reference: str | None = None
     spei_tracking_key: str | None = None
     spei_reference: str | None = None
-    counterpart_clabe: str | None = None
+    counterpart_identifier: str | None = None
+    counterpart_identifier_type: str | None = None
     counterpart_name: str | None = None
     currency: str = "MXN"
 

@@ -66,6 +66,8 @@ class TransactionRepository:
         bank_reference: str | None = None,
         spei_tracking_key: str | None = None,
         spei_reference: str | None = None,
+        counterpart_identifier: str | None = None,
+        counterpart_identifier_type: str | None = None,
     ) -> Transaction:
         txn = Transaction(
             account_id=account_id,
@@ -79,6 +81,8 @@ class TransactionRepository:
             bank_reference=bank_reference,
             spei_tracking_key=spei_tracking_key,
             spei_reference=spei_reference,
+            counterpart_identifier=counterpart_identifier,
+            counterpart_identifier_type=counterpart_identifier_type,
         )
         self._db.add(txn)
         self._db.flush()

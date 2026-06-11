@@ -23,15 +23,21 @@ def render() -> None:
 
     rows = []
     for t in transfers:
+        src_counterpart = (
+            t.source_transaction.counterpart_identifier if t.source_transaction else None
+        )
+        dst_counterpart = (
+            t.destination_transaction.counterpart_identifier if t.destination_transaction else None
+        )
         from_label = (
             f"{t.from_account.alias} ({t.from_account.bank})"
             if t.from_account
-            else t.counterpart_identifier or "—"
+            else src_counterpart or "—"
         )
         to_label = (
             f"{t.to_account.alias} ({t.to_account.bank})"
             if t.to_account
-            else t.counterpart_identifier or "—"
+            else dst_counterpart or "—"
         )
         src_desc = t.source_transaction.description if t.source_transaction else "—"
         dst_desc = t.destination_transaction.description if t.destination_transaction else "—"

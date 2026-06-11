@@ -60,7 +60,7 @@ class NuDebitParser(BankParser):
 
     # SPEI detail block (text after each transaction line)
     # Matches 16-digit card numbers (debit-card/credit-card) or 18-digit CLABEs
-    _DETAIL_CLABE_RE: ClassVar = re.compile(r"(\d{16,18})\s+(?:clabe|debit-card|credit-card)")
+    _DETAIL_CLABE_RE: ClassVar = re.compile(r"(\d{16,18})\s+(clabe|debit-card|credit-card)")
     _TRACKING_RE: ClassVar = re.compile(r"Clave de rastreo\s+(\S+?)(?:,|\s)")
     _REFERENCE_RE: ClassVar = re.compile(r"Clave de referencia\s+(\S+)")
 
@@ -171,14 +171,24 @@ class NuDebitParser(BankParser):
         )
         return text
 
-    def _extract_spei_detail(self, detail: str) -> tuple[str | None, str | None, str | None]:
-        counterpart_clabe: str | None = None
+    _IDENTIFIER_TYPE_MAP: ClassVar[dict[str, str]] = {
+        "clabe": "clabe",
+        "debit-card": "card",
+        "credit-card": "card",
+    }
+
+    def _extract_spei_detail(
+        self, detail: str
+    ) -> tuple[str | None, str | None, str | None, str | None]:
+        counterpart_identifier: str | None = None
+        counterpart_identifier_type: str | None = None
         spei_tracking_key: str | None = None
         spei_reference: str | None = None
 
         m = self._DETAIL_CLABE_RE.search(detail)
         if m:
-            counterpart_clabe = m.group(1)
+            counterpart_identifier = m.group(1)
+            counterpart_identifier_type = self._IDENTIFIER_TYPE_MAP[m.group(2)]
 
         m = self._TRACKING_RE.search(detail)
         if m:
@@ -188,7 +198,12 @@ class NuDebitParser(BankParser):
         if m:
             spei_reference = m.group(1)
 
-        return counterpart_clabe, spei_tracking_key, spei_reference
+        return (
+            counterpart_identifier,
+            counterpart_identifier_type,
+            spei_tracking_key,
+            spei_reference,
+        )
 
     def _build_transactions(self, text: str, matches: list[Match[str]]) -> list[ParsedTransaction]:
         transactions: list[ParsedTransaction] = []
@@ -197,8 +212,8 @@ class NuDebitParser(BankParser):
 
             detail_start = m.end()
             detail_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-            counterpart_clabe, spei_tracking_key, spei_reference = self._extract_spei_detail(
-                text[detail_start:detail_end]
+            counterpart_id, counterpart_type, spei_tracking_key, spei_reference = (
+                self._extract_spei_detail(text[detail_start:detail_end])
             )
 
             transactions.append(
@@ -209,7 +224,8 @@ class NuDebitParser(BankParser):
                     transaction_type=self._infer_type(amount),
                     spei_tracking_key=spei_tracking_key,
                     spei_reference=spei_reference,
-                    counterpart_clabe=counterpart_clabe,
+                    counterpart_identifier=counterpart_id,
+                    counterpart_identifier_type=counterpart_type,
                 )
             )
         return transactions

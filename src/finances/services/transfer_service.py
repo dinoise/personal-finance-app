@@ -111,8 +111,7 @@ class TransferService:
         known_clabes: set[str],
     ) -> Transfer:
         is_outgoing = txn.amount < Decimal("0")
-        counterpart_id, counterpart_type = self._resolve_counterpart(txn, known_clabes)
-        transfer_type = self._transfer_type(counterpart_id, known_clabes)
+        transfer_type = self._transfer_type(txn, known_clabes)
 
         return self._transfer_repo.create(
             amount=abs(txn.amount),
@@ -125,8 +124,6 @@ class TransferService:
             spei_reference=txn.spei_reference,
             from_account_id=txn.account_id if is_outgoing else None,
             to_account_id=None if is_outgoing else txn.account_id,
-            counterpart_identifier=counterpart_id,
-            counterpart_identifier_type=counterpart_type,
         )
 
     def _complete_transfer(self, transfer: Transfer, txn: Transaction) -> int:
@@ -139,13 +136,8 @@ class TransferService:
             return 1
         return 0
 
-    def _resolve_counterpart(
-        self, txn: Transaction, known_clabes: set[str]
-    ) -> tuple[str | None, str | None]:
-        return None, None
-
-    def _transfer_type(self, counterpart_id: str | None, known_clabes: set[str]) -> str:
-        if counterpart_id is not None and counterpart_id in known_clabes:
+    def _transfer_type(self, txn: Transaction, known_clabes: set[str]) -> str:
+        if txn.counterpart_identifier is not None and txn.counterpart_identifier in known_clabes:
             return "internal"
         return "outgoing"
 
