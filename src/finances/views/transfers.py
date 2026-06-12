@@ -1,9 +1,42 @@
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
+
 import pandas as pd
 import streamlit as st
 
+from finances.models.transfer import Transfer
 from finances.services.transfer_service import detect_transfers, get_all_transfers
+
+
+def _txn_date(t: Transfer) -> date | None:
+    if t.source_transaction:
+        return t.source_transaction.date
+    if t.destination_transaction:
+        return t.destination_transaction.date
+    return None
+
+
+def _txn_amount(t: Transfer) -> Decimal:
+    if t.source_transaction:
+        return abs(t.source_transaction.amount)
+    if t.destination_transaction:
+        return t.destination_transaction.amount
+    return Decimal("0")
+
+
+def _txn_currency(t: Transfer) -> str:
+    txn = t.source_transaction or t.destination_transaction
+    return txn.currency if txn else "MXN"
+
+
+def _txn_spei_key(t: Transfer) -> str | None:
+    if t.source_transaction and t.source_transaction.spei_tracking_key:
+        return t.source_transaction.spei_tracking_key
+    if t.destination_transaction and t.destination_transaction.spei_tracking_key:
+        return t.destination_transaction.spei_tracking_key
+    return None
 
 
 def render() -> None:
@@ -29,15 +62,16 @@ def render() -> None:
         dst_counterpart = (
             t.destination_transaction.counterpart_identifier if t.destination_transaction else None
         )
+        from_account = t.source_transaction.account if t.source_transaction else None
+        to_account = t.destination_transaction.account if t.destination_transaction else None
+
         from_label = (
-            f"{t.from_account.alias} ({t.from_account.bank})"
-            if t.from_account
+            f"{from_account.alias} ({from_account.bank})"
+            if from_account
             else src_counterpart or "—"
         )
         to_label = (
-            f"{t.to_account.alias} ({t.to_account.bank})"
-            if t.to_account
-            else dst_counterpart or "—"
+            f"{to_account.alias} ({to_account.bank})" if to_account else dst_counterpart or "—"
         )
         src_desc = t.source_transaction.description if t.source_transaction else "—"
         dst_desc = t.destination_transaction.description if t.destination_transaction else "—"
@@ -45,15 +79,15 @@ def render() -> None:
 
         rows.append(
             {
-                "Date": t.date,
-                "Amount": float(t.amount),
-                "Currency": t.currency,
+                "Date": _txn_date(t),
+                "Amount": float(_txn_amount(t)),
+                "Currency": _txn_currency(t),
                 "Type": t.transfer_type,
                 "From": from_label,
                 "To": to_label,
                 "Source description": src_desc,
                 "Dest description": dst_desc,
-                "SPEI key": t.spei_tracking_key or "—",
+                "SPEI key": _txn_spei_key(t) or "—",
                 "Linked": "✓" if linked else "·",
             }
         )
