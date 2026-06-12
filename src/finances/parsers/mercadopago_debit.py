@@ -1,10 +1,7 @@
 import re
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, ClassVar
-
-import pdfplumber
 
 from finances.parsers.base import BankParser
 from finances.parsers.utils import MONTHS, parse_date_dmy, parse_decimal
@@ -15,13 +12,13 @@ from finances.schemas.parser_schemas import (
     ParsedPocketMovement,
     ParsedStatement,
     ParsedTransaction,
-    StatementData,
-    TransactionType,
 )
 
 
 class MercadoPagoDebitParser(BankParser):
-    # Header regexes
+    # ── Class-level patterns ──────────────────────────────────────────────────
+
+    # Header (page 1)
     _PERIOD_RE: ClassVar = re.compile(
         r"Periodo:\s+Del\s+(\d{1,2})\s+al\s+(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})"
     )
@@ -42,12 +39,12 @@ class MercadoPagoDebitParser(BankParser):
     _DATE_RE: ClassVar = re.compile(r"^\d{2}-\d{2}-\d{4}$")
     _OP_ID_RE: ClassVar = re.compile(r"^\d{9,}$")
 
-    # Savings pocket movement patterns
+    # Pocket movement descriptions
     _POCKET_DEPOSIT_RE: ClassVar = re.compile(r"^Monto apartado (.+)$", re.IGNORECASE)
     _POCKET_WITHDRAWAL_RE: ClassVar = re.compile(r"^Monto retirado (.+)$", re.IGNORECASE)
     _POCKET_INTEREST_RE: ClassVar = re.compile(r"^Ganancia", re.IGNORECASE)
 
-    # ── Properties ──────────────────────────────────────────────────────────
+    # ── Identity ──────────────────────────────────────────────────────────────
 
     @property
     def bank_name(self) -> BankName:
@@ -57,39 +54,7 @@ class MercadoPagoDebitParser(BankParser):
     def account_type(self) -> AccountType:
         return "debit"
 
-    # ── Public API (ABC) ────────────────────────────────────────────────────
-
-    def parse_account(self, path: Path) -> ParsedAccount:
-        with pdfplumber.open(path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-        return self._account_from_text(text)
-
-    def parse_statement(self, path: Path) -> ParsedStatement:
-        with pdfplumber.open(path) as pdf:
-            text = pdf.pages[0].extract_text() or ""
-        return self._statement_from_text(text, path.name)
-
-    def parse_transactions(self, path: Path) -> list[ParsedTransaction]:
-        transactions: list[ParsedTransaction] = []
-        with pdfplumber.open(path) as pdf:
-            for page in pdf.pages:
-                transactions.extend(self._parse_page(page))
-        return transactions
-
-    def parse(self, path: Path) -> StatementData:
-        with pdfplumber.open(path) as pdf:
-            first_page_text = pdf.pages[0].extract_text() or ""
-            transactions: list[ParsedTransaction] = []
-            for page in pdf.pages:
-                transactions.extend(self._parse_page(page))
-        return StatementData(
-            account=self._account_from_text(first_page_text),
-            statement=self._statement_from_text(first_page_text, path.name),
-            transactions=transactions,
-            pocket_movements=self.parse_pocket_movements(transactions),
-        )
-
-    # ── Public extensions ───────────────────────────────────────────────────
+    # ── Hooks ─────────────────────────────────────────────────────────────────
 
     def parse_pocket_movements(
         self, transactions: list[ParsedTransaction]
@@ -134,7 +99,7 @@ class MercadoPagoDebitParser(BankParser):
 
         return movements
 
-    # ── Private helpers ─────────────────────────────────────────────────────
+    # ── Abstract implementation ───────────────────────────────────────────────
 
     def _account_from_text(self, text: str) -> ParsedAccount:
         account_number: str | None = None
@@ -157,12 +122,14 @@ class MercadoPagoDebitParser(BankParser):
         day_start, day_end, month_str, year_str = m.groups()
         month = MONTHS[month_str.lower()]
         year = int(year_str)
+
         opening_balance: Decimal | None = None
         closing_balance: Decimal | None = None
         bm = self._BALANCE_RE.search(text)
         if bm:
             opening_balance = parse_decimal(bm.group(1))
             closing_balance = parse_decimal(bm.group(2))
+
         return ParsedStatement(
             period_start=date(year, month, int(day_start)),
             period_end=date(year, month, int(day_end)),
@@ -170,40 +137,20 @@ class MercadoPagoDebitParser(BankParser):
             closing_balance=closing_balance,
         )
 
-    # ── Private parsing pipeline ────────────────────────────────────────────
+    def _parse_page(self, page: Any) -> list[ParsedTransaction]:
+        # Uses word coordinates instead of raw text — MP's table layout requires
+        # positional bucketing to correctly associate dates, descriptions and amounts.
+        words: list[dict[str, Any]] = page.extract_words(x_tolerance=3, y_tolerance=3)
+        return self._build_transactions(self._bucket_words(words))
 
-    @staticmethod
-    def _infer_type(amount: Decimal) -> TransactionType:
-        return "payment" if amount > 0 else "charge"
-
-    def _parse_page(self, page: object) -> list[ParsedTransaction]:
-        """
-        Extract transactions from one page using word (x, y) coordinates.
-
-        Strategy: identify row anchors (the top-y of each date/op_id pair),
-        then assign every word to the nearest anchor within self._ROW_HEIGHT.
-        This is more robust than band-based bucketing because openhtmltopdf
-        sometimes places multiple transactions in the same rect band and
-        renders op_id a few points above the corresponding date.
-        """
-        words: list[dict[str, Any]] = page.extract_words(x_tolerance=3, y_tolerance=3)  # type: ignore[attr-defined]
-        bucketed = self._bucket_words(words)
-        return self._build_transactions(bucketed)
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _bucket_words(self, words: list[dict[str, Any]]) -> list[dict[str, str]]:
-        """
-        Two-pass bucketing:
-        Pass 1 — collect all date and op_id tops to build the anchor list.
-                 Each unique top (rounded to 2pt) that has either a valid date
-                 or a valid op_id becomes a row anchor.
-        Pass 2 — assign every word to the nearest anchor within self._ROW_HEIGHT.
-
-        Anchors are derived independently per column so that a 3-4pt vertical
-        drift between the date cell and the op_id cell does not split a row.
-        """
+        """Two-pass bucketing: build row anchors from date/op_id positions, then
+        assign every word to the nearest anchor within _ROW_HEIGHT."""
         RowWords = list[tuple[float, float, str]]
 
-        # Pass 1: collect candidate anchor tops from date and op_id columns
+        # Pass 1: collect anchor tops from date and op_id columns
         date_tops: list[float] = []
         op_id_tops: list[float] = []
         for word in words:
@@ -215,12 +162,11 @@ class MercadoPagoDebitParser(BankParser):
             elif self._COL_DESC_MAX <= x0 < self._COL_ID_MAX and self._OP_ID_RE.match(text):
                 op_id_tops.append(top)
 
-        # Merge date and op_id tops: group within 5pt, take the mean as anchor
+        # Merge tops within 5pt into a single anchor (running mean)
         raw_tops = sorted(set(date_tops + op_id_tops))
         anchors: list[float] = []
         for t in raw_tops:
             if anchors and abs(t - anchors[-1]) <= 5.0:
-                # Merge into the existing anchor (running mean)
                 anchors[-1] = (anchors[-1] + t) / 2
             else:
                 anchors.append(t)
@@ -232,7 +178,7 @@ class MercadoPagoDebitParser(BankParser):
             {"date": [], "description": [], "op_id": [], "value": []} for _ in anchors
         ]
 
-        # Pass 2: assign every word to the nearest anchor within self._ROW_HEIGHT
+        # Pass 2: assign every word to the nearest anchor
         for word in words:
             top = word["top"]
             x0 = word["x0"]
@@ -275,7 +221,6 @@ class MercadoPagoDebitParser(BankParser):
 
     def _build_transactions(self, rows: list[dict[str, str]]) -> list[ParsedTransaction]:
         transactions: list[ParsedTransaction] = []
-
         for row in rows:
             # Pick the first DD-MM-YYYY token — header words may share the band
             date_str = next((t for t in row["date"].split() if self._DATE_RE.match(t)), "")
@@ -296,10 +241,10 @@ class MercadoPagoDebitParser(BankParser):
 
             amount = parse_decimal(value_str)
 
-            # Some MP rows have no description in the PDF (e.g. micro interest credits).
-            # Fall back to a label derived from the sign so the record is never blank.
+            # Some MP rows have no description (e.g. micro interest credits).
             if not description:
                 description = "Ganancia" if amount > 0 else "Movimiento"
+
             transactions.append(
                 ParsedTransaction(
                     date=parse_date_dmy(date_str),

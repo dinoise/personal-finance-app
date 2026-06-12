@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    Time,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -116,7 +117,7 @@ class Transaction(Base):
         ForeignKey("installment_plans.id"),
         comment="Reference to the MSI plan if this transaction is an installment payment.",
     )
-    date: Mapped[date] = mapped_column(
+    date: Mapped[datetime.date] = mapped_column(
         Date, nullable=False, comment="Transaction date as reported by the bank."
     )
     description: Mapped[str] = mapped_column(
@@ -142,12 +143,29 @@ class Transaction(Base):
     bank_reference: Mapped[str | None] = mapped_column(
         String(100), comment="Bank's own unique identifier for this movement."
     )
-    is_internal_transfer: Mapped[bool] = mapped_column(
-        default=False,
+    counterpart_identifier: Mapped[str | None] = mapped_column(
+        String(20),
+        comment="CLABE, card number, or account number of the counterpart.",
+    )
+    counterpart_identifier_type: Mapped[str | None] = mapped_column(
+        String(20),
+        comment="Type of counterpart_identifier: clabe, card, account_number, unknown.",
+    )
+    spei_tracking_key: Mapped[str | None] = mapped_column(
+        String(30),
         comment=(
-            "True when the counterpart CLABE matches a known account. "
-            "Detected by comparing to_clabe against accounts.clabe — never by name."
+            "BANXICO SPEI tracking key extracted from the PDF. "
+            "Used by TransferService.detect_transfers() to link paired movements."
         ),
+    )
+    spei_reference: Mapped[str | None] = mapped_column(
+        String(10),
+        comment="Short numeric reference from the SPEI detail line.",
+    )
+    time: Mapped[datetime.time | None] = mapped_column(
+        Time,
+        nullable=True,
+        comment="Transaction time in UTC. NULL when not reported by the bank.",
     )
 
     account: Mapped[Account] = relationship(back_populates="transactions")

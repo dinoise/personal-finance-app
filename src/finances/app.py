@@ -6,7 +6,7 @@ def main() -> None:
 
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Import Statement", "Transactions"],
+        ["Dashboard", "Import Statement", "Transactions", "Transfers"],
     )
 
     if page == "Dashboard":
@@ -21,6 +21,11 @@ def main() -> None:
     elif page == "Transactions":
         st.title("Transactions")
         st.info("Coming soon.")
+
+    elif page == "Transfers":
+        from finances.views.transfers import render
+
+        render()
 
 
 if __name__ == "__main__":
