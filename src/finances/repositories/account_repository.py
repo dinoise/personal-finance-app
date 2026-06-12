@@ -17,6 +17,10 @@ class AccountRepository:
         rows = self._db.query(Account.clabe).filter(Account.clabe.isnot(None)).all()
         return {row[0] for row in rows}
 
+    def get_all_account_ids(self) -> set[int]:
+        rows = self._db.query(Account.id).all()
+        return {row[0] for row in rows}
+
     def get_by_bank_and_number(
         self, bank: str, account_type: str, account_number: str
     ) -> Account | None:

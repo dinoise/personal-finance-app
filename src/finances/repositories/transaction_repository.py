@@ -1,9 +1,11 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from finances.models.transaction import Transaction
+from finances.models.transfer import Transfer
 
 
 class TransactionRepository:
@@ -103,6 +105,44 @@ class TransactionRepository:
             .filter(
                 (Transaction.spei_tracking_key.isnot(None))
                 | (Transaction.bank_reference.isnot(None))
+            )
+            .all()
+        )
+
+    def get_transfers_indexed_by_spei_key(self) -> dict[str, Transfer]:
+        """Return existing transfers indexed by the spei_tracking_key of their source transaction.
+
+        Replaces TransferRepository.get_indexed_by_spei_key() — the spei_tracking_key
+        now lives only in transactions, not in transfers.
+        """
+        rows = (
+            self._db.query(Transaction, Transfer)
+            .join(
+                Transfer,
+                (Transfer.source_transaction_id == Transaction.id)
+                | (Transfer.destination_transaction_id == Transaction.id),
+            )
+            .filter(Transaction.spei_tracking_key.isnot(None))
+            .all()
+        )
+        return {txn.spei_tracking_key: transfer for txn, transfer in rows if txn.spei_tracking_key}
+
+    def get_unlinked_own_incoming(self, known_account_ids: set[int]) -> list[Transaction]:
+        """Return incoming transactions on own accounts with no transfer as destination yet.
+
+        Used by the amount+date fallback matching pass in TransferService.
+        """
+        already_linked = (
+            select(Transfer.destination_transaction_id)
+            .where(Transfer.destination_transaction_id == Transaction.id)
+            .correlate(Transaction)
+        )
+        return (
+            self._db.query(Transaction)
+            .filter(
+                Transaction.account_id.in_(known_account_ids),
+                Transaction.amount > 0,
+                ~exists(already_linked),
             )
             .all()
         )

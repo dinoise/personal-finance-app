@@ -1,8 +1,8 @@
 from datetime import date
-from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
 
+from finances.models.transaction import Transaction
 from finances.models.transfer import Transfer
 
 
@@ -12,59 +12,70 @@ class TransferRepository:
 
     def create(
         self,
-        amount: Decimal,
-        currency: str,
-        txn_date: date,
         transfer_type: str,
         source_transaction_id: int | None = None,
         destination_transaction_id: int | None = None,
-        spei_tracking_key: str | None = None,
-        spei_reference: str | None = None,
-        from_account_id: int | None = None,
-        to_account_id: int | None = None,
     ) -> Transfer:
         transfer = Transfer(
             source_transaction_id=source_transaction_id,
             destination_transaction_id=destination_transaction_id,
-            spei_tracking_key=spei_tracking_key,
-            spei_reference=spei_reference,
-            amount=amount,
-            currency=currency,
-            date=txn_date,
             transfer_type=transfer_type,
-            from_account_id=from_account_id,
-            to_account_id=to_account_id,
         )
         self._db.add(transfer)
         self._db.flush()
         return transfer
 
-    def get_indexed_by_spei_key(self) -> dict[str, Transfer]:
-        """Return all transfers that have a spei_tracking_key, indexed by it."""
-        rows = self._db.query(Transfer).filter(Transfer.spei_tracking_key.isnot(None)).all()
-        return {t.spei_tracking_key: t for t in rows if t.spei_tracking_key is not None}
-
     def get_all(self) -> list[Transfer]:
+        transfers = (
+            self._db.query(Transfer)
+            .options(
+                joinedload(Transfer.source_transaction).joinedload(Transaction.account),
+                joinedload(Transfer.destination_transaction).joinedload(Transaction.account),
+            )
+            .all()
+        )
+        return sorted(
+            transfers,
+            key=lambda t: (
+                t.source_transaction.date
+                if t.source_transaction
+                else t.destination_transaction.date
+                if t.destination_transaction
+                else date.min
+            ),
+            reverse=True,
+        )
+
+    def get_partial_transfers(self) -> list[Transfer]:
+        """Return internal transfers with only one side linked, awaiting the other PDF.
+
+        Only "internal" transfers can be completed by amount+date matching — outgoing
+        transfers go to external accounts that will never have an importable PDF.
+        """
         return (
             self._db.query(Transfer)
             .options(
-                joinedload(Transfer.from_account),
-                joinedload(Transfer.to_account),
                 joinedload(Transfer.source_transaction),
                 joinedload(Transfer.destination_transaction),
             )
-            .order_by(Transfer.date.desc())
+            .filter(
+                Transfer.transfer_type == "internal",
+                (
+                    (Transfer.source_transaction_id.isnot(None))
+                    & (Transfer.destination_transaction_id.is_(None))
+                )
+                | (
+                    (Transfer.source_transaction_id.is_(None))
+                    & (Transfer.destination_transaction_id.isnot(None))
+                ),
+            )
             .all()
         )
 
-    def complete_source(self, transfer: Transfer, transaction_id: int, account_id: int) -> None:
+    def complete_source(self, transfer: Transfer, transaction_id: int) -> None:
         transfer.source_transaction_id = transaction_id
-        transfer.from_account_id = account_id
         self._db.flush()
 
-    def complete_destination(
-        self, transfer: Transfer, transaction_id: int, account_id: int
-    ) -> None:
+    def complete_destination(self, transfer: Transfer, transaction_id: int) -> None:
         transfer.destination_transaction_id = transaction_id
-        transfer.to_account_id = account_id
         self._db.flush()
