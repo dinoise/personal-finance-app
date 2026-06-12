@@ -1,3 +1,23 @@
+## v0.8.0 (2026-06-12)
+
+### Feat
+
+- **transfer-service**: resolve counterpart_identifier from transaction on detect
+- **models**: move counterpart fields from transfers to transactions
+- **transfer-service**: implement detect_transfers and transfers view
+- **models**: redesign transfers table and add spei fields to transactions
+
+### Refactor
+
+- **transfer-service**: normalize repos and fix amount-date matching pass
+- **models**: normalize transfers table and add time to transactions
+- **services**: extract AccountService and TransactionService, standardize context manager pattern
+- **parsers**: move parse_date_dmy_text to utils and remove redundant _MONTH_ABBR from NuDebitParser
+
+### Perf
+
+- **transfer-service**: replace per-row queries with in-memory suffix index
+
 ## v0.7.0 (2026-06-06)
 
 ### Feat
